@@ -1,0 +1,2520 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>寶可夢 TCG Pocket 模擬器 | PTCGP Pack Simulator</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght=300;400;500;700;900&display=swap');
+        
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background: radial-gradient(circle at 50% 0%, #1a1e29 0%, #0b0d13 100%);
+            color: #f1f5f9;
+            overflow-x: hidden;
+            min-height: 100vh;
+        }
+
+        /* 玻璃擬態 */
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.45);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        /* 卡牌 3D 翻轉 */
+        .card-container {
+            perspective: 1000px;
+        }
+
+        .card-inner {
+            transition: transform 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            transform-style: preserve-3d;
+        }
+
+        .card-flipped {
+            transform: rotateY(180deg);
+        }
+
+        .card-front, .card-back {
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+        }
+
+        /* 修正卡牌正反面相反的 Bug */
+        .card-front {
+            transform: rotateY(180deg); /* 正面預設背對觀眾 */
+        }
+
+        .card-back {
+            transform: rotateY(0deg); /* 背面預設面向觀眾 */
+        }
+
+        /* 全息雷射閃卡效果 */
+        .holo-shimmer::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(
+                125deg,
+                rgba(255,255,255,0) 0%,
+                rgba(255,255,255,0) 30%,
+                rgba(255,255,255,0.3) 45%,
+                rgba(255,255,255,0.4) 50%,
+                rgba(255,255,255,0.3) 55%,
+                rgba(255,255,255,0) 70%,
+                rgba(255,255,255,0) 100%
+            );
+            background-size: 200% 200%;
+            background-position: 0% 0%;
+            transition: background-position 0.5s ease;
+            z-index: 25;
+            pointer-events: none;
+        }
+
+        .holo-shimmer:hover::after {
+            background-position: 100% 100%;
+        }
+
+        /* 皇冠卡炫彩金光 */
+        @keyframes gold-glow {
+            0%, 100% { box-shadow: 0 0 15px rgba(251, 191, 36, 0.5), inset 0 0 10px rgba(251, 191, 36, 0.3); }
+            50% { box-shadow: 0 0 30px rgba(251, 191, 36, 0.9), inset 0 0 20px rgba(251, 191, 36, 0.6); }
+        }
+        .rarity-crown-glow {
+            animation: gold-glow 2s infinite ease-in-out;
+            border: 2px solid #fbbf24;
+        }
+
+        /* 隱藏滾動條 */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* 煙火/金粉特效粒子 */
+        .sparkle {
+            position: absolute;
+            pointer-events: none;
+            background: radial-gradient(circle, #fff 10%, transparent 60%);
+            border-radius: 50%;
+            mix-blend-mode: screen;
+            animation: shoot 1s ease-out forwards;
+        }
+
+        @keyframes shoot {
+            0% { transform: translate(0, 0) scale(1); opacity: 1; }
+            100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
+        }
+
+        /* 受傷震動特效 */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-8px) rotate(-1deg); }
+            40%, 80% { transform: translateX(8px) rotate(1deg); }
+        }
+        .shake-hurt {
+            animation: shake 0.4s ease-in-out;
+        }
+    </style>
+</head>
+<body class="flex flex-col min-height-screen">
+
+    <!-- 頂部導覽列 -->
+    <header class="glass-panel sticky top-0 z-50 px-4 py-3 border-b border-slate-800">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="bg-red-500 text-white font-extrabold px-3 py-1.5 rounded-lg text-sm shadow-md flex items-center gap-1.5 transform hover:scale-105 transition-transform">
+                    <i class="fa-solid fa-gamepad"></i>
+                    <span>PTCG Pocket</span>
+                </div>
+                <h1 class="font-bold text-lg hidden md:block tracking-wide bg-gradient-to-r from-yellow-400 to-amber-200 bg-clip-text text-transparent">模擬工作室</h1>
+            </div>
+
+            <!-- 資源條 -->
+            <div class="flex items-center gap-4 text-xs md:text-sm">
+                <!-- 沙漏 -->
+                <div class="flex items-center gap-1.5 bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700">
+                    <i class="fa-regular fa-clock text-cyan-400 animate-pulse"></i>
+                    <span class="text-slate-400">開包沙漏:</span>
+                    <span id="hourglass-count" class="font-bold text-cyan-300">120</span>
+                </div>
+                <!-- 得卡挑戰能量 -->
+                <div class="flex items-center gap-1.5 bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700">
+                    <i class="fa-solid fa-bolt text-amber-400"></i>
+                    <span class="text-slate-400">得卡能量:</span>
+                    <span id="wonder-energy" class="font-bold text-amber-300">5/5</span>
+                </div>
+                <!-- 金幣 -->
+                <div class="flex items-center gap-1.5 bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700">
+                    <i class="fa-solid fa-coins text-yellow-400"></i>
+                    <span id="gold-count" class="font-bold text-yellow-300">1000</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 頁面主要內容 -->
+    <main class="flex-grow max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col gap-6">
+        
+        <!-- 主頁面頁籤切換 -->
+        <div class="flex justify-center border-b border-slate-800">
+            <nav class="flex space-x-2 md:space-x-8 overflow-x-auto no-scrollbar" aria-label="Tabs">
+                <button onclick="switchTab('packs')" id="tab-packs" class="tab-btn py-3 px-4 text-center border-b-2 border-yellow-400 text-yellow-400 font-medium text-sm md:text-base flex items-center gap-2 transition-all whitespace-nowrap">
+                    <i class="fa-solid fa-box-open"></i>擴充包抽卡
+                </button>
+                <button onclick="switchTab('wonder')" id="tab-wonder" class="tab-btn py-3 px-4 text-center border-b-2 border-transparent text-slate-400 hover:text-slate-200 font-medium text-sm md:text-base flex items-center gap-2 transition-all whitespace-nowrap">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>得卡挑戰
+                </button>
+                <button onclick="switchTab('collection')" id="tab-collection" class="tab-btn py-3 px-4 text-center border-b-2 border-transparent text-slate-400 hover:text-slate-200 font-medium text-sm md:text-base flex items-center gap-2 transition-all whitespace-nowrap">
+                    <i class="fa-solid fa-images"></i>收藏圖鑑
+                </button>
+                <button onclick="switchTab('deck')" id="tab-deck" class="tab-btn py-3 px-4 text-center border-b-2 border-transparent text-slate-400 hover:text-slate-200 font-medium text-sm md:text-base flex items-center gap-2 transition-all whitespace-nowrap">
+                    <i class="fa-solid fa-folder-plus"></i>牌組構建
+                </button>
+                <!-- 全新戰鬥分頁 -->
+                <button onclick="switchTab('battle')" id="tab-battle" class="tab-btn py-3 px-4 text-center border-b-2 border-transparent text-slate-400 hover:text-slate-200 font-medium text-sm md:text-base flex items-center gap-2 transition-all whitespace-nowrap">
+                    <i class="fa-solid fa-swords text-red-400"></i>實戰對決
+                </button>
+            </nav>
+        </div>
+
+        <!-- ==================== 1. 擴充包抽卡分頁 ==================== -->
+        <section id="sect-packs" class="tab-content flex flex-col lg:flex-row gap-6">
+            
+            <!-- 左側：擴充包選擇與操作 -->
+            <div class="lg:w-1/3 flex flex-col gap-4">
+                <div class="glass-panel p-5 rounded-2xl flex flex-col gap-4">
+                    <h2 class="text-xl font-bold border-l-4 border-yellow-400 pl-3">選擇擴充包</h2>
+                    <p class="text-slate-400 text-sm">每包消耗 12 個沙漏（或自動恢復時間）。必出5張卡牌，高機率包含閃卡！</p>
+                    
+                    <!-- 三款卡包選擇卡片 -->
+                    <div class="flex flex-col gap-3 mt-2">
+                        <!-- Charizard Pack -->
+                        <div onclick="selectPack('charizard')" id="pack-opt-charizard" class="pack-option cursor-pointer p-4 rounded-xl border-2 border-red-500/50 bg-red-950/20 hover:bg-red-950/30 transition-all flex items-center gap-4 relative overflow-hidden group">
+                            <div class="absolute -right-6 -bottom-6 text-7xl text-red-500/10 group-hover:scale-110 transition-transform"><i class="fa-solid fa-fire"></i></div>
+                            <span class="text-3xl">??</span>
+                            <div class="flex-grow">
+                                <h3 class="font-bold text-red-200">最強基因：噴火龍</h3>
+                                <p class="text-xs text-slate-400">主打 火、草 屬性。包含夢幻皇冠卡。</p>
+                            </div>
+                            <div class="text-red-400"><i class="fa-solid fa-circle-check"></i></div>
+                        </div>
+
+                        <!-- Pikachu Pack -->
+                        <div onclick="selectPack('pikachu')" id="pack-opt-pikachu" class="pack-option cursor-pointer p-4 rounded-xl border border-slate-700 bg-slate-800/30 hover:bg-slate-800/50 transition-all flex items-center gap-4 relative overflow-hidden group">
+                            <div class="absolute -right-6 -bottom-6 text-7xl text-yellow-500/10 group-hover:scale-110 transition-transform"><i class="fa-solid fa-bolt"></i></div>
+                            <span class="text-3xl">?</span>
+                            <div class="flex-grow">
+                                <h3 class="font-bold text-slate-200">最強基因：皮卡丘</h3>
+                                <p class="text-xs text-slate-400">主打 雷、水 屬性。快來試試手氣！</p>
+                            </div>
+                            <div class="text-yellow-400 opacity-0 group-hover:opacity-50"><i class="fa-solid fa-circle-check"></i></div>
+                        </div>
+
+                        <!-- Mewtwo Pack -->
+                        <div onclick="selectPack('mewtwo')" id="pack-opt-mewtwo" class="pack-option cursor-pointer p-4 rounded-xl border border-slate-700 bg-slate-800/30 hover:bg-slate-800/50 transition-all flex items-center gap-4 relative overflow-hidden group">
+                            <div class="absolute -right-6 -bottom-6 text-7xl text-purple-500/10 group-hover:scale-110 transition-transform"><i class="fa-solid fa-eye"></i></div>
+                            <span class="text-3xl">??</span>
+                            <div class="flex-grow">
+                                <h3 class="font-bold text-slate-200">最強基因：超夢</h3>
+                                <p class="text-xs text-slate-400">主打 超能、格鬥 屬性。極致的精神爆發！</p>
+                            </div>
+                            <div class="text-purple-400 opacity-0 group-hover:opacity-50"><i class="fa-solid fa-circle-check"></i></div>
+                        </div>
+                    </div>
+
+                    <!-- 操作按鈕 -->
+                    <div class="flex flex-col gap-2.5 mt-4">
+                        <button onclick="openPack()" class="w-full py-3.5 bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-slate-950 font-black rounded-xl shadow-lg shadow-yellow-500/20 active:scale-95 transition-all text-center flex items-center justify-center gap-2 text-sm md:text-base">
+                            <i class="fa-solid fa-box-open"></i>單包撕開 (消耗 12 沙漏)
+                        </button>
+                        <!-- ?? 10 連抽全新按鈕 ?? -->
+                        <button onclick="openTenPacks()" class="w-full py-4 bg-gradient-to-r from-red-500 via-yellow-500 to-amber-500 hover:from-red-400 hover:via-yellow-400 hover:to-amber-400 text-slate-950 font-black rounded-xl shadow-lg shadow-red-500/20 active:scale-95 transition-all text-center flex items-center justify-center gap-2 text-sm md:text-base">
+                            <i class="fa-solid fa-boxes-stacked"></i>豪華 10 連抽！(消耗 120 沙漏)
+                        </button>
+                        <button onclick="buyHourglasses()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-lg text-xs transition-all flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-plus text-green-400"></i>購買 120 個沙漏 (消耗 50 金幣)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 抽卡歷史簡報 -->
+                <div class="glass-panel p-4 rounded-2xl text-xs flex flex-col gap-2">
+                    <span class="font-bold text-slate-400">抽卡說明與機率：</span>
+                    <ul class="list-disc pl-4 text-slate-400 space-y-1">
+                        <li>前 3 張卡保證普通稀有度 (? 或 ??)</li>
+                        <li>第 4 張卡有 20% 機率升級為 ??? 或更高！</li>
+                        <li>第 5 張卡有 10% 機率為 ★、★★、★★★ 或 ?? 皇冠極稀有卡！</li>
+                        <li>10 連抽一口氣撕開 50 張卡，獲得極稀有卡的機率極大幅度增加！</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 右側：抽卡展示區 -->
+            <div class="lg:w-2/3 flex flex-col items-center justify-center bg-slate-950/40 border border-slate-800/60 rounded-3xl p-6 min-h-[500px] relative overflow-hidden" id="pack-display-zone">
+                <!-- 預設包裝外觀 -->
+                <div id="pack-unopened" class="flex flex-col items-center gap-6 py-10 transition-all">
+                    <!-- 虛擬卡包包裝袋 -->
+                    <div class="w-64 h-96 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-2xl shadow-2xl relative flex flex-col items-center justify-between p-4 overflow-hidden transform hover:-translate-y-2 hover:rotate-1 hover:shadow-cyan-500/10 transition-all duration-300">
+                        <div class="absolute inset-0 bg-cover bg-center opacity-30" style="background-image: url('https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=400');"></div>
+                        <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-slate-950"></div>
+                        
+                        <!-- 包裝頂部鋸齒 -->
+                        <div class="absolute top-0 left-0 w-full flex justify-between px-1">
+                            <div class="w-full h-2 flex gap-[2px]">{ <div class="flex-grow bg-slate-700 h-1"></div> }</div>
+                        </div>
+
+                        <div class="z-10 text-center w-full mt-4">
+                            <div id="pack-label-badge" class="bg-red-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded mx-auto w-max mb-1">CHARIZARD</div>
+                            <h4 class="text-lg font-black tracking-widest text-slate-100">最強基因</h4>
+                            <p class="text-[9px] text-yellow-400 tracking-wider">EXPANSION PACK</p>
+                        </div>
+
+                        <!-- 居中大圖示 -->
+                        <div class="z-10 w-24 h-24 rounded-full flex items-center justify-center bg-gradient-to-br from-slate-700 to-slate-800 border border-slate-600/50 shadow-inner group-hover:scale-110 transition-transform duration-300" id="pack-center-icon">
+                            <i class="fa-solid fa-fire text-4xl text-red-500 animate-pulse"></i>
+                        </div>
+
+                        <div class="z-10 w-full text-center mb-4">
+                            <p class="text-[10px] text-slate-400">包含隨機寶可夢卡牌</p>
+                            <span class="text-xs font-bold text-yellow-400/80 animate-bounce block mt-2">點擊左側開始開抽！</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ?? 10 連抽未撕開包裝袋展示 (重疊卡包堆) ?? -->
+                <div id="pack-ten-unopened" class="hidden flex flex-col items-center gap-6 py-4 w-full">
+                    <div class="text-center">
+                        <span class="text-sm text-yellow-400 font-bold tracking-widest uppercase">10 Packs Ready!</span>
+                        <h3 class="text-xl md:text-2xl font-black mt-1">您一口氣擺放了 10 包擴充包！</h3>
+                    </div>
+
+                    <!-- 10包卡包重疊排開的視覺效果 -->
+                    <div class="flex justify-center items-center h-72 w-full max-w-xl relative mt-4">
+                        <div class="absolute w-44 h-64 bg-slate-800 border border-slate-700 rounded-xl shadow-lg transform -rotate-12 -translate-x-12 opacity-60"></div>
+                        <div class="absolute w-44 h-64 bg-slate-800 border border-slate-700 rounded-xl shadow-lg transform -rotate-6 -translate-x-6 opacity-80"></div>
+                        <div class="absolute w-44 h-64 bg-slate-800 border border-slate-700 rounded-xl shadow-lg transform rotate-3 translate-x-4 opacity-80"></div>
+                        <div class="absolute w-44 h-64 bg-slate-800 border border-slate-700 rounded-xl shadow-lg transform rotate-12 translate-x-12 opacity-60"></div>
+                        
+                        <!-- 核心最上方包裝袋 -->
+                        <div class="absolute w-48 h-68 bg-gradient-to-br from-slate-800 to-slate-900 border-2 border-yellow-500/50 rounded-2xl shadow-2xl flex flex-col items-center justify-between p-3 z-30 transform hover:scale-105 transition-transform duration-300">
+                            <div class="text-center w-full mt-2">
+                                <span class="bg-yellow-500 text-slate-950 text-[9px] font-black px-2 py-0.5 rounded">10 PACKS</span>
+                                <h4 class="text-sm font-black tracking-widest text-slate-100 mt-1" id="ten-pack-label">最強基因</h4>
+                            </div>
+                            <div class="w-16 h-16 rounded-full flex items-center justify-center bg-gradient-to-br from-slate-700 to-slate-800 border border-slate-600 shadow-inner">
+                                <i class="fa-solid fa-boxes-stacked text-2xl text-yellow-400 animate-pulse"></i>
+                            </div>
+                            <p class="text-[9px] text-slate-400 text-center">一口氣解鎖 50 張寶可夢卡牌</p>
+                        </div>
+                    </div>
+
+                    <button onclick="ripTenPacks()" class="mt-4 px-8 py-3 bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-slate-950 font-black rounded-xl shadow-xl shadow-yellow-500/20 text-md active:scale-95 transition-all flex items-center gap-2">
+                        <i class="fa-solid fa-fire-burner"></i>撕開所有卡包 (Ripping Pack!)
+                    </button>
+                </div>
+
+                <!-- 抽牌後的5張展示狀態 (單包與十包共用格) -->
+                <div id="pack-opened" class="hidden w-full flex flex-col items-center gap-8">
+                    <div class="text-center">
+                        <span class="text-sm text-yellow-400 font-bold tracking-widest uppercase" id="reveal-instruction">Tap each card to reveal!</span>
+                        <h3 class="text-2xl font-black mt-1" id="opened-pack-title">點擊卡牌翻面解鎖！</h3>
+                        
+                        <!-- 一鍵全部翻開按鈕 -->
+                        <button onclick="revealAllCards()" id="btn-reveal-all" class="mt-3 px-4 py-1.5 bg-yellow-500 hover:bg-yellow-400 text-slate-950 text-xs font-black rounded-full shadow transition-all flex items-center gap-1.5 mx-auto">
+                            <i class="fa-solid fa-circle-check"></i>一鍵全部翻開
+                        </button>
+                    </div>
+
+                    <!-- 5張卡片/50張卡片容器 -->
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 w-full px-2 max-h-[450px] overflow-y-auto no-scrollbar py-2" id="five-cards-grid">
+                        <!-- 動態插入卡片 -->
+                    </div>
+
+                    <div class="flex gap-3">
+                        <button onclick="resetPackZone()" class="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 font-bold rounded-lg text-sm transition-all">
+                            返回卡包大廳
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 2. 得卡挑戰分頁 ==================== -->
+        <section id="sect-wonder" class="tab-content hidden flex flex-col gap-6">
+            <div class="glass-panel p-6 rounded-3xl flex flex-col md:flex-row gap-6 items-center justify-between">
+                <div class="md:w-2/3 flex flex-col gap-2">
+                    <h2 class="text-2xl font-extrabold text-amber-400 flex items-center gap-2">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>得卡挑戰 (Wonder Pick)
+                    </h2>
+                    <p class="text-slate-300 text-sm md:text-base">
+                        從世界各地的訓練家開出的卡包中隨機抽選！系統會展示這包內含的 5 張卡，隨後進行蓋卡並洗牌。您可以消耗 <span class="text-amber-400 font-bold">1 個得卡能量</span> 來憑手氣抽取其中一張卡！
+                    </p>
+                    <div class="text-xs text-slate-400 flex flex-wrap gap-x-4 gap-y-1 mt-1">
+                        <span><i class="fa-solid fa-circle-info mr-1"></i>保證能抽到展示中5張卡的其中一張。</span>
+                        <span><i class="fa-solid fa-circle-info mr-1"></i>每小時會自動刷新一次挑戰對象。</span>
+                    </div>
+                </div>
+                <div class="md:w-1/3 flex justify-end w-full gap-2">
+                    <button onclick="refreshWonder()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg border border-slate-700 transition-all flex items-center gap-1">
+                        <i class="fa-solid fa-arrows-rotate"></i>手動刷新挑戰 (免費)
+                    </button>
+                </div>
+            </div>
+
+            <!-- 得卡挑戰展示主區 -->
+            <div class="bg-slate-950/40 border border-slate-800/60 rounded-3xl p-6 min-h-[450px] flex flex-col items-center justify-center relative" id="wonder-playground">
+                <!-- 狀態1：未洗牌 (展示 5 張卡與對手資訊) -->
+                <div id="wonder-status-show" class="w-full flex flex-col items-center gap-6">
+                    <div class="flex items-center gap-3 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-800">
+                        <div class="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-white shadow-md">
+                            <span>K</span>
+                        </div>
+                        <div>
+                            <p class="text-xs text-slate-400">來自其他訓練家的開包分享</p>
+                            <h4 class="text-sm font-bold text-slate-200" id="wonder-trainer-name">訓練家 Kanto_Red_99</h4>
+                        </div>
+                    </div>
+
+                    <!-- 5 張預覽卡 -->
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 w-full px-2 max-w-4xl" id="wonder-preview-grid">
+                        <!-- 動態插入 -->
+                    </div>
+
+                    <div class="flex flex-col items-center gap-3 mt-4">
+                        <button onclick="startWonderShuffle()" class="px-8 py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl shadow-lg shadow-amber-500/20 active:scale-95 transition-all text-sm md:text-base flex items-center gap-2">
+                            <i class="fa-solid fa-shuffle"></i>蓋牌並洗牌 (消耗 1 點能量)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 狀態2：洗牌中 & 選擇中 -->
+                <div id="wonder-status-play" class="hidden w-full flex flex-col items-center gap-6">
+                    <div class="text-center">
+                        <h3 class="text-xl font-bold text-amber-400">卡片已蓋上並充分洗牌！</h3>
+                        <p class="text-slate-400 text-sm mt-1">選定一張卡片，點擊它來迎接驚喜！</p>
+                    </div>
+
+                    <!-- 5 張蓋著的卡 -->
+                    <div class="grid grid-cols-5 gap-3 w-full px-2 max-w-3xl justify-center" id="wonder-play-grid">
+                        <!-- 動態插入蓋牌 -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 3. 個人卡牌收藏圖鑑分頁 ==================== -->
+        <section id="sect-collection" class="tab-content hidden flex flex-col gap-4">
+            
+            <!-- 圖鑑控制列：篩選與搜尋 -->
+            <div class="glass-panel p-4 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between">
+                
+                <!-- 搜尋與文字篩選 -->
+                <div class="w-full md:w-1/3 relative">
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-500">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                    </span>
+                    <input type="text" id="collect-search" oninput="filterCollection()" class="w-full bg-slate-900 border border-slate-700 rounded-xl py-2 pl-10 pr-4 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-400" placeholder="搜尋卡片名稱...">
+                </div>
+
+                <!-- 屬性 & 稀有度篩選 -->
+                <div class="w-full md:w-2/3 flex flex-wrap gap-2 justify-start md:justify-end">
+                    <!-- 屬性過濾 -->
+                    <select id="collect-filter-type" onchange="filterCollection()" class="bg-slate-900 border border-slate-700 rounded-xl py-2 px-3 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-yellow-400">
+                        <option value="all">所有屬性 / 類型</option>
+                        <option value="Fire">?? 火屬性 (Fire)</option>
+                        <option value="Water">?? 水屬性 (Water)</option>
+                        <option value="Grass">?? 草屬性 (Grass)</option>
+                        <option value="Lightning">? 雷屬性 (Lightning)</option>
+                        <option value="Psychic">?? 超能屬性 (Psychic)</option>
+                        <option value="Colorless">? 無屬性 (Colorless)</option>
+                        <option value="Trainer">?? 訓練家卡 (Trainer)</option>
+                    </select>
+
+                    <!-- 稀有度過濾 -->
+                    <select id="collect-filter-rarity" onchange="filterCollection()" class="bg-slate-900 border border-slate-700 rounded-xl py-2 px-3 text-xs md:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-yellow-400">
+                        <option value="all">所有稀有度</option>
+                        <option value="crown">?? 皇冠級 (Crown)</option>
+                        <option value="stars">★ / ★★ / ★★★ 星級</option>
+                        <option value="diamonds">? 菱形 (常見/罕見)</option>
+                    </select>
+
+                    <!-- 只顯示已擁有 -->
+                    <button id="btn-toggle-owned" onclick="toggleOwnedFilter()" class="py-2 px-4 rounded-xl border border-slate-700 bg-slate-800 text-xs md:text-sm text-slate-300 font-medium hover:bg-slate-700 transition-all">
+                        只看已收集
+                    </button>
+                </div>
+            </div>
+
+            <!-- 收集進度條 -->
+            <div class="glass-panel p-4 rounded-2xl flex flex-col md:flex-row items-center gap-4 justify-between">
+                <div class="flex-grow w-full">
+                    <div class="flex justify-between items-center mb-1 text-sm">
+                        <span class="font-bold text-slate-300">目前圖鑑收集率</span>
+                        <span id="collection-stats-ratio" class="font-extrabold text-yellow-400">0 / 24 (0%)</span>
+                    </div>
+                    <div class="w-full bg-slate-900 h-3 rounded-full overflow-hidden border border-slate-800">
+                        <div id="collection-progress-bar" class="bg-gradient-to-r from-yellow-500 to-amber-400 h-full transition-all duration-500" style="width: 0%"></div>
+                    </div>
+                </div>
+                <button onclick="resetWholeCollection()" class="px-4 py-2 border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs font-bold rounded-lg transition-all whitespace-nowrap">
+                    重置收藏數據
+                </button>
+            </div>
+
+            <!-- 收藏卡牌展示格 -->
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4" id="collection-grid">
+                <!-- 動態注入所有卡片，若未擁有則黑白顯示 -->
+            </div>
+        </section>
+
+        <!-- ==================== 4. 牌組構建分頁 ==================== -->
+        <section id="sect-deck" class="tab-content hidden flex flex-col gap-6">
+            
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- 左側：目前的牌組 -->
+                <div class="lg:col-span-2 flex flex-col gap-4">
+                    <div class="glass-panel p-5 rounded-2xl flex flex-col gap-4">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <h2 class="text-xl font-bold text-slate-200">當前構建牌組</h2>
+                                <span id="deck-card-count" class="bg-cyan-500 text-slate-950 text-xs font-black px-2 py-0.5 rounded-full">0 / 20</span>
+                            </div>
+                            <button onclick="clearCurrentDeck()" class="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 font-semibold">
+                                <i class="fa-solid fa-trash-can"></i>清空牌組
+                            </button>
+                        </div>
+                        <p class="text-slate-400 text-xs">從您「已擁有」的收藏中點選卡片加入。標準 PTCGP 牌組由 20 張卡組成！</p>
+                        
+                        <!-- 牌組格 -->
+                        <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-3 min-h-[250px] bg-slate-950/30 border border-slate-800 p-4 rounded-xl" id="deck-active-cards">
+                            <!-- 空白提示 -->
+                            <div class="col-span-full flex flex-col items-center justify-center text-slate-500 text-sm gap-2 py-12">
+                                <i class="fa-solid fa-rectangle-list text-4xl"></i>
+                                <span>目前牌組內沒有卡片。在右側或下方選擇卡片加入！</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右側：牌組統計與儲存 -->
+                <div class="flex flex-col gap-4">
+                    <div class="glass-panel p-5 rounded-2xl flex flex-col gap-4">
+                        <h3 class="text-lg font-bold border-l-4 border-cyan-400 pl-2">牌組資訊統計</h3>
+                        
+                        <!-- 屬性分佈 -->
+                        <div class="flex flex-col gap-2">
+                            <span class="text-xs text-slate-400 font-semibold">屬性佔比 (能量類型)</span>
+                            <div class="flex h-3 rounded-full overflow-hidden bg-slate-800 border border-slate-700" id="deck-energy-bar">
+                                <!-- 動態能量條 -->
+                            </div>
+                            <div class="grid grid-cols-2 gap-1 text-[10px] text-slate-400 mt-1" id="deck-energy-legend">
+                                <!-- 動態圖例 -->
+                            </div>
+                        </div>
+
+                        <!-- 戰力平均 -->
+                        <div class="grid grid-cols-2 gap-2 border-t border-slate-800 pt-3 text-center">
+                            <div class="bg-slate-900/50 p-2 rounded-lg">
+                                <p class="text-slate-500 text-[10px]">平均 HP</p>
+                                <p id="deck-avg-hp" class="text-cyan-300 font-bold text-lg">0</p>
+                            </div>
+                            <div class="bg-slate-900/50 p-2 rounded-lg">
+                                <p class="text-slate-500 text-[10px]">寶可夢 / 訓練家</p>
+                                <p id="deck-poke-train-ratio" class="text-amber-300 font-bold text-sm mt-1">0 / 0</p>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col gap-2 mt-2 border-t border-slate-800 pt-3">
+                            <input type="text" id="deck-name-input" class="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400" placeholder="輸入牌組名稱..." value="我的夢幻主力牌組">
+                            <button onclick="saveDeckToLocal()" class="w-full py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-lg text-sm transition-all flex items-center justify-center gap-2">
+                                <i class="fa-regular fa-floppy-disk"></i>儲存當前牌組
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 下方：可供選擇的已擁有卡牌 -->
+            <div class="glass-panel p-5 rounded-2xl flex flex-col gap-4">
+                <h3 class="text-lg font-bold border-l-4 border-yellow-400 pl-2">可加入的收藏卡牌</h3>
+                <p class="text-xs text-slate-400">點擊以下您「已收集」到的卡片，即可將其增派或移出牌組。</p>
+                <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3" id="deck-candidate-grid">
+                    <!-- 動態載入使用者已擁有的卡片 -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 5. 實戰對決分頁 ==================== -->
+        <section id="sect-battle" class="tab-content hidden flex flex-col gap-6">
+            
+            <!-- 狀態：未開始對戰（設定與準備） -->
+            <div id="battle-setup-zone" class="glass-panel p-6 rounded-3xl flex flex-col items-center gap-6 max-w-2xl mx-auto text-center">
+                <div class="w-20 h-20 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 text-4xl animate-bounce">
+                    <i class="fa-solid fa-swords"></i>
+                </div>
+                <div>
+                    <h2 class="text-2xl font-extrabold text-slate-100">準備進入實戰對決！</h2>
+                    <p class="text-slate-400 text-sm mt-2">
+                        利用您的收藏組建的 20 張牌組與電腦強敵 (AI) 進行一場經典的快速寶可夢卡牌對抗！<br>
+                        先擊倒對手 <span class="text-yellow-400 font-bold">3 隻</span> 寶可夢 (獲得 3 分) 即可獲勝！
+                    </p>
+                </div>
+
+                <!-- 牌組檢測與自動填滿 -->
+                <div id="battle-deck-checker" class="w-full bg-slate-900/80 border border-slate-800 p-4 rounded-xl text-left text-sm flex flex-col gap-2">
+                    <div class="flex items-center justify-between">
+                        <span class="font-bold text-slate-300">您當前的構建牌組:</span>
+                        <span id="battle-deck-count-badge" class="font-bold px-2 py-0.5 rounded text-xs bg-red-500 text-white">0 / 20 張</span>
+                    </div>
+                    <p class="text-xs text-slate-400">進入對決需要整整 20 張卡。如果您的卡牌不足，可以點選下方自動組建測試牌組！</p>
+                    <div class="flex flex-wrap gap-2 mt-2">
+                        <button onclick="autoFillMockDeck()" class="py-1.5 px-3 bg-cyan-600 hover:bg-cyan-500 text-slate-100 text-xs font-bold rounded transition-all">
+                            一鍵生成推薦對決牌組 (免費體驗)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 選擇對手 AI 難度 -->
+                <div class="w-full text-left">
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">選擇 AI 對手牌組主題</label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="cursor-pointer border border-slate-700 bg-slate-800/40 rounded-xl p-3 flex items-center gap-2 hover:bg-slate-800 transition-all">
+                            <input type="radio" name="ai-deck-type" value="charizard" checked class="text-yellow-400 focus:ring-yellow-400">
+                            <div>
+                                <h4 class="text-xs font-bold text-slate-200">AI 噴火龍極炎爆擊</h4>
+                                <p class="text-[10px] text-slate-500">主打高 HP 的火系與一般系猛攻</p>
+                            </div>
+                        </label>
+                        <label class="cursor-pointer border border-slate-700 bg-slate-800/40 rounded-xl p-3 flex items-center gap-2 hover:bg-slate-800 transition-all">
+                            <input type="radio" name="ai-deck-type" value="pikachu" class="text-yellow-400 focus:ring-yellow-400">
+                            <div>
+                                <h4 class="text-xs font-bold text-slate-200">AI 皮卡丘雷霆神速</h4>
+                                <p class="text-[10px] text-slate-500">主打電光石火、低耗能爆發閃擊</p>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <button onclick="startBattle()" class="w-full py-4 bg-gradient-to-r from-red-500 to-amber-500 hover:from-red-400 hover:to-amber-400 text-slate-950 font-black rounded-xl text-lg shadow-lg shadow-red-500/20 active:scale-95 transition-all flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-gamepad"></i>開啟對決 Match Start!
+                </button>
+            </div>
+
+            <!-- 狀態：對戰中（主戰場板塊） -->
+            <div id="battle-playground-zone" class="hidden flex flex-col gap-4">
+                
+                <!-- 對戰頂部控制：計分板、回合狀態 -->
+                <div class="glass-panel p-4 rounded-2xl flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                        <!-- 玩家計分 -->
+                        <div class="text-center">
+                            <p class="text-[10px] text-slate-400 font-bold uppercase">玩家分數 (Prize)</p>
+                            <div class="flex gap-1 mt-1 justify-center" id="player-prizes-ui">
+                                <!-- 顆粒指示燈 -->
+                            </div>
+                        </div>
+                        <span class="text-2xl font-black text-slate-600">VS</span>
+                        <!-- AI 計分 -->
+                        <div class="text-center">
+                            <p class="text-[10px] text-slate-400 font-bold uppercase">AI 分數 (Prize)</p>
+                            <div class="flex gap-1 mt-1 justify-center" id="ai-prizes-ui">
+                                <!-- 顆粒指示燈 -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 回合中/結束回合 -->
+                    <div class="flex items-center gap-3">
+                        <div class="text-right">
+                            <span class="text-xs text-slate-400 block font-bold">當前局勢</span>
+                            <span id="battle-turn-indicator" class="text-sm font-black text-yellow-400">您的回合 (YOUR TURN)</span>
+                        </div>
+                        <button id="btn-end-turn" onclick="aiTurn()" class="px-5 py-2 bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-black text-sm rounded-lg shadow-md transition-all">
+                            結束回合
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 戰場實體棋盤 -->
+                <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                    
+                    <!-- 左側 3 欄：雙方戰鬥與後備卡牌槽 -->
+                    <div class="lg:col-span-3 flex flex-col gap-4">
+                        
+                        <!-- AI 電腦方 (上方) -->
+                        <div class="bg-red-950/20 border border-red-900/30 rounded-2xl p-4 flex flex-col gap-3 relative">
+                            <span class="absolute top-2 left-3 text-[10px] text-red-500 font-black tracking-widest">AI OPPONENT BOARD</span>
+                            
+                            <div class="flex flex-col md:flex-row gap-4 justify-around items-center mt-3">
+                                <!-- AI 後備席 (最多2個) -->
+                                <div class="flex gap-3">
+                                    <div class="text-center">
+                                        <p class="text-[9px] text-slate-500 mb-1">AI 後備 1</p>
+                                        <div id="ai-bench-0" class="w-24 aspect-[2/3] border-2 border-dashed border-slate-800 rounded-xl flex items-center justify-center bg-slate-950/50"></div>
+                                    </div>
+                                    <div class="text-center">
+                                        <p class="text-[9px] text-slate-500 mb-1">AI 後備 2</p>
+                                        <div id="ai-bench-1" class="w-24 aspect-[2/3] border-2 border-dashed border-slate-800 rounded-xl flex items-center justify-center bg-slate-950/50"></div>
+                                    </div>
+                                </div>
+
+                                <!-- AI 戰鬥席 (核心) -->
+                                <div class="text-center">
+                                    <p class="text-xs font-bold text-red-400 mb-1"><i class="fa-solid fa-crosshairs"></i> AI 戰鬥寶可夢</p>
+                                    <div id="ai-active-slot" class="w-36 aspect-[2/3] border-2 border-dashed border-red-900/50 rounded-2xl flex items-center justify-center bg-slate-950/50 relative"></div>
+                                </div>
+
+                                <!-- AI 牌組與手牌縮圖 -->
+                                <div class="flex flex-col gap-2 items-center bg-slate-900/50 p-2.5 rounded-xl border border-slate-800 text-xs text-slate-400">
+                                    <span id="ai-deck-count" class="block font-semibold">AI 牌組餘: 15 張</span>
+                                    <span id="ai-hand-count" class="block font-semibold text-cyan-400">AI 手牌: 5 張</span>
+                                    <span id="ai-energy-count" class="block font-semibold text-yellow-500">AI 儲備能: 0</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 玩家方 (下方) -->
+                        <div class="bg-blue-950/20 border border-blue-900/30 rounded-2xl p-4 flex flex-col gap-3 relative">
+                            <span class="absolute top-2 left-3 text-[10px] text-blue-500 font-black tracking-widest">YOUR BOARD</span>
+                            
+                            <!-- 每回合可附能資訊 -->
+                            <div class="absolute top-2 right-3 flex items-center gap-1 bg-slate-900/80 px-2 py-1 rounded text-xs border border-slate-800">
+                                <i class="fa-solid fa-circle-bolt text-yellow-400"></i>
+                                <span class="text-[10px] text-slate-300">本回合手動附能:</span>
+                                <span id="player-energy-attach-avail" class="font-bold text-green-400">可使用</span>
+                            </div>
+
+                            <div class="flex flex-col-reverse md:flex-row gap-4 justify-around items-center mt-3">
+                                <!-- 玩家能量庫與剩餘牌組 -->
+                                <div class="flex flex-col gap-2 items-center bg-slate-900/50 p-2.5 rounded-xl border border-slate-800 text-xs text-slate-400">
+                                    <span id="player-deck-count" class="block font-semibold">剩餘牌組: 15 張</span>
+                                    <span id="player-energy-pool" class="block font-semibold text-yellow-400">能量儲備: 0 點</span>
+                                    <button onclick="attachEnergyToActive()" id="btn-attach-energy" class="mt-1 py-1 px-2.5 bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-black text-[10px] rounded transition-all">
+                                        手動附加 1 點能量
+                                    </button>
+                                </div>
+
+                                <!-- 玩家戰鬥席 -->
+                                <div class="text-center">
+                                    <p class="text-xs font-bold text-blue-400 mb-1"><i class="fa-solid fa-shield-halved"></i> 您的戰鬥寶可夢</p>
+                                    <div id="player-active-slot" class="w-36 aspect-[2/3] border-2 border-dashed border-blue-900/50 rounded-2xl flex items-center justify-center bg-slate-950/50 relative"></div>
+                                    
+                                    <!-- 攻擊按鈕組 -->
+                                    <div class="flex gap-1.5 justify-center mt-2" id="player-active-actions">
+                                        <!-- 動態插入攻擊、退後 -->
+                                    </div>
+                                </div>
+
+                                <!-- 玩家後備席 -->
+                                <div class="flex gap-3">
+                                    <div class="text-center">
+                                        <p class="text-[9px] text-slate-500 mb-1">後備 1 (Bench)</p>
+                                        <div id="player-bench-0" class="w-24 aspect-[2/3] border-2 border-dashed border-slate-800 rounded-xl flex items-center justify-center bg-slate-950/50"></div>
+                                    </div>
+                                    <div class="text-center">
+                                        <p class="text-[9px] text-slate-500 mb-1">後備 2 (Bench)</p>
+                                        <div id="player-bench-1" class="w-24 aspect-[2/3] border-2 border-dashed border-slate-800 rounded-xl flex items-center justify-center bg-slate-950/50"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- 右側 1 欄：即時日誌與操作反饋 -->
+                    <div class="flex flex-col gap-4">
+                        <div class="glass-panel p-4 rounded-2xl flex-grow flex flex-col h-[400px]">
+                            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+                                <i class="fa-solid fa-list-ul"></i> 對戰即時日誌 (LOGS)
+                            </h3>
+                            <div id="battle-log-box" class="flex-grow bg-slate-950/60 rounded-xl p-3 text-[11px] overflow-y-auto no-scrollbar font-mono text-slate-300 space-y-1.5 border border-slate-900">
+                                <!-- 動態插入日誌 -->
+                            </div>
+                            <button onclick="concedeBattle()" class="mt-3 py-1.5 bg-red-950/40 hover:bg-red-950/60 text-red-400 border border-red-900/30 font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1">
+                                <i class="fa-solid fa-flag"></i> 投降認輸 (Concede)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 底部：手牌展示區 -->
+                <div class="glass-panel p-4 rounded-2xl flex flex-col gap-2">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest"><i class="fa-solid fa-cards-blank"></i> 您的目前手牌 (YOUR HAND)</h3>
+                    <div class="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-8 gap-3" id="player-hand-cards">
+                        <!-- 動態插入玩家手牌，高亮可玩卡牌 -->
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+    </main>
+
+    <!-- 頁尾 -->
+    <footer class="mt-auto py-6 border-t border-slate-800 text-center text-xs text-slate-500">
+        <p class="mb-2">c 2026 PTCGP 模擬工作室. 本網頁僅供學術交流與同好娛樂，不代表任一官方立場。</p>
+        <p>寶可夢相關商標與資產均屬於 Nintendo、Creatures、GAME FREAK 及寶可夢公司所有。</p>
+    </footer>
+
+    <!-- 自訂訊息彈窗 (代替不友善的 alert) -->
+    <div id="custom-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div class="glass-panel max-w-sm w-full p-6 rounded-2xl border border-slate-700/80 shadow-2xl text-center transform scale-95 transition-transform duration-300">
+            <div class="w-12 h-12 rounded-full bg-yellow-400/10 flex items-center justify-center mx-auto mb-4 text-yellow-400 text-2xl">
+                <i class="fa-solid fa-circle-exclamation"></i>
+            </div>
+            <h3 class="text-lg font-bold text-slate-100" id="modal-title">提示訊息</h3>
+            <p class="text-slate-400 text-sm mt-2" id="modal-desc">這裡顯示詳細內容</p>
+            <button onclick="closeModal()" class="mt-5 w-full py-2 bg-yellow-400 hover:bg-yellow-300 text-slate-950 font-bold rounded-lg text-sm transition-all">
+                確認
+            </button>
+        </div>
+    </div>
+
+    <!-- ==================== JavaScript 核心邏輯 ==================== -->
+    <script>
+        // --- 1. 卡片資料庫 (模擬 24 張經典卡片，精準對接高畫質透明 PokeAPI 圖庫，完美修復破圖 BUG) ---
+        const POKEMON_DATABASE = [
+            { id: 1, name: "噴火龍 ex", hp: 180, type: "Fire", rarity: "crown", pack: "charizard", isTrainer: false, desc: "爆裂火焰！擁有全場最強輸出", gradient: "from-red-600 via-orange-500 to-yellow-500", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/6.png" },
+            { id: 2, name: "皮卡丘 ex", hp: 120, type: "Lightning", rarity: "star3", pack: "pikachu", isTrainer: false, desc: "紅蓮閃電！極速蓄電爆擊", gradient: "from-yellow-400 via-amber-400 to-amber-600", emoji: "?", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png" },
+            { id: 3, name: "超夢 ex", hp: 150, type: "Psychic", rarity: "star3", pack: "mewtwo", isTrainer: false, desc: "精神狂擊！掌控精神的究極體", gradient: "from-purple-600 via-indigo-600 to-pink-500", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/150.png" },
+            { id: 4, name: "急凍鳥 ex", hp: 140, type: "Water", rarity: "star2", pack: "pikachu", isTrainer: false, desc: "暴風雪！凍結一切對手的威脅", gradient: "from-sky-400 to-blue-600", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/144.png" },
+            { id: 5, name: "閃電鳥 ex", hp: 130, type: "Lightning", rarity: "star2", pack: "pikachu", isTrainer: false, desc: "打雷！強悍的電磁力破壞者", gradient: "from-yellow-300 to-orange-400", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/145.png" },
+            { id: 6, name: "火焰鳥 ex", hp: 140, type: "Fire", rarity: "star2", pack: "charizard", isTrainer: false, desc: "火焰風暴！烈焰重生的傳說鳥", gradient: "from-red-500 to-yellow-500", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/146.png" },
+            { id: 7, name: "妙蛙花 ex", hp: 160, type: "Grass", rarity: "star2", pack: "charizard", isTrainer: false, desc: "巨型吸取！高體能回復與消耗", gradient: "from-emerald-500 to-teal-700", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/3.png" },
+            { id: 8, name: "沙奈朵", hp: 110, type: "Psychic", rarity: "star1", pack: "mewtwo", isTrainer: false, desc: "精神傳送！最完美的後排能量輔助", gradient: "from-purple-400 to-emerald-500", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/282.png" },
+            { id: 9, name: "妙蛙種子", hp: 70, type: "Grass", rarity: "diamond1", pack: "charizard", isTrainer: false, desc: "撞擊！活潑開朗的草系始祖", gradient: "from-green-400 to-emerald-500", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/1.png" },
+            { id: 10, name: "小火龍", hp: 60, type: "Fire", rarity: "diamond1", pack: "charizard", isTrainer: false, desc: "火花！小小的尾巴搖曳著鬥志", gradient: "from-orange-400 to-red-500", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/4.png" },
+            { id: 11, name: "傑尼龜", hp: 65, type: "Water", rarity: "diamond1", pack: "pikachu", isTrainer: false, desc: "泡泡發射！堅硬的甲殼安全防護", gradient: "from-cyan-400 to-blue-500", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/7.png" },
+            { id: 12, name: "皮卡丘", hp: 60, type: "Lightning", rarity: "diamond1", pack: "pikachu", isTrainer: false, desc: "電擊！超人氣明星選手", gradient: "from-yellow-300 to-yellow-400", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png" },
+            { id: 13, name: "超夢", hp: 90, type: "Psychic", rarity: "diamond2", pack: "mewtwo", isTrainer: false, desc: "幻象光線！未被揭露的強大精神波動", gradient: "from-purple-500 to-pink-500", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/150.png" },
+            { id: 14, name: "娜姿 (支援者)", hp: 0, type: "Trainer", rarity: "diamond2", pack: "mewtwo", isTrainer: true, desc: "強制對手換出戰鬥寶可夢！戰略核心", gradient: "from-slate-700 to-slate-800", emoji: "???♀?", image: "https://images.unsplash.com/photo-1618336753974-aae8e04506aa?w=300&auto=format&fit=crop" },
+            { id: 15, name: "精靈球 (物品)", hp: 0, type: "Trainer", rarity: "diamond1", pack: "charizard", isTrainer: true, desc: "從牌組隨機抽出一張基礎寶可夢卡", gradient: "from-slate-600 to-slate-700", emoji: "??", image: "https://images.unsplash.com/photo-1655635643532-fa9ba2648cbe?w=300&auto=format&fit=crop" },
+            { id: 16, name: "博士的研究 (支援者)", hp: 0, type: "Trainer", rarity: "diamond1", pack: "charizard", isTrainer: true, desc: "從自己的牌組中抽取 2 張卡片", gradient: "from-slate-600 to-slate-700", emoji: "??", image: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=300&auto=format&fit=crop" },
+            { id: 17, name: "怪力 ex", hp: 180, type: "Colorless", rarity: "star1", pack: "mewtwo", isTrainer: false, desc: "重拳爆擊！堅如鋼鐵的強悍物理輸出", gradient: "from-amber-700 to-stone-600", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/68.png" },
+            { id: 18, name: "快龍 ex", hp: 160, type: "Colorless", rarity: "star2", pack: "mewtwo", isTrainer: false, desc: "流星群！橫掃全場的毀滅力量", gradient: "from-amber-300 to-yellow-500", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/149.png" },
+            { id: 19, name: "九尾", hp: 90, type: "Fire", rarity: "diamond2", pack: "charizard", isTrainer: false, desc: "妖火！高雅九尾吐露神祕金焰", gradient: "from-amber-400 to-red-500", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/38.png" },
+            { id: 20, name: "暴鯉龍", hp: 150, type: "Water", rarity: "diamond3", pack: "pikachu", isTrainer: false, desc: "狂暴破壞！震撼大洋的狂野暴君", gradient: "from-blue-700 to-indigo-800", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/130.png" },
+            { id: 21, name: "卡比獸", hp: 150, type: "Colorless", rarity: "diamond2", pack: "pikachu", isTrainer: false, desc: "翻滾！以驚人肉盾體型吸收對手攻勢", gradient: "from-stone-500 to-slate-600", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/143.png" },
+            { id: 22, name: "風速狗 ex", hp: 150, type: "Fire", rarity: "star1", pack: "charizard", isTrainer: false, desc: "極速火炎！威武不凡的神速化身", gradient: "from-orange-500 to-red-600", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/59.png" },
+            { id: 23, name: "雷丘", hp: 100, type: "Lightning", rarity: "diamond2", pack: "pikachu", isTrainer: false, desc: "百萬伏特！皮卡丘之進化完美型態", gradient: "from-yellow-400 to-orange-500", emoji: "?", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/26.png" },
+            { id: 24, name: "耿鬼 ex", hp: 130, type: "Psychic", rarity: "star1", pack: "mewtwo", isTrainer: false, desc: "暗影之門！限制對手支援者卡的邪惡能力", gradient: "from-indigo-900 to-purple-800", emoji: "??", image: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/94.png" }
+        ];
+
+        // --- 2. 玩家狀態 (預設) ---
+        let playerState = {
+            hourglasses: 120,
+            wonderEnergy: 5,
+            gold: 1000,
+            collection: {}, // 格式為 { cardId: 數量 }
+            currentDeck: [], // 格式為 cardId 陣列
+            activePack: 'charizard',
+            wonderChallenge: [] // 當前得卡挑戰的 5 張卡片
+        };
+
+        // --- 3. 戰鬥局勢狀態變數 ---
+        let battleObj = {
+            status: "idle",       // idle, select_active, active, end
+            playerDeck: [],
+            playerHand: [],
+            playerActive: null,    // 寶可夢卡對象 + 附帶戰鬥屬性 { ...card, currentHp: X, attachedEnergy: Y }
+            playerBench: [],       // 同上
+            playerPrizes: 0,
+            playerEnergyPool: 0,
+            hasAttachedEnergyThisTurn: false,
+
+            aiDeck: [],
+            aiHand: [],
+            aiActive: null,
+            aiBench: [],
+            aiPrizes: 0,
+            aiEnergyPool: 0,
+            aiHasAttachedEnergyThisTurn: false,
+
+            turn: "player",        // player, ai
+            logs: []
+        };
+
+        // 儲存抽卡當前批次卡牌（支援十連抽 Reveal All）
+        let currentlyDrawnCards = [];
+
+        // 得卡挑戰點擊鎖（防止多點與重置衝突）
+        let isWonderPicking = false;
+
+        // 讀取/寫入本機儲存 (簡單防?檔)
+        function loadGameState() {
+            const saved = localStorage.getItem('ptcgp_sim_save');
+            if (saved) {
+                try {
+                    playerState = JSON.parse(saved);
+                    // 確保屬性存在
+                    if (!playerState.collection) playerState.collection = {};
+                    if (!playerState.currentDeck) playerState.currentDeck = [];
+                    if (!playerState.wonderChallenge) playerState.wonderChallenge = [];
+                } catch(e) {
+                    console.error("讀取存檔失敗:", e);
+                }
+            }
+            updateResourcesUI();
+            checkBattleDeckAvailability();
+        }
+
+        function saveGameState() {
+            localStorage.setItem('ptcgp_sim_save', JSON.stringify(playerState));
+        }
+
+        // --- 3. 初始化載入 ---
+        window.addEventListener('DOMContentLoaded', () => {
+            loadGameState();
+            // 每 10 秒自動獲得 1 個開包沙漏
+            setInterval(() => {
+                playerState.hourglasses += 1;
+                updateResourcesUI();
+                saveGameState();
+            }, 10000);
+            
+            // 每 1 分鐘恢復 1 點得卡能量 (上限 5)
+            setInterval(() => {
+                if (playerState.wonderEnergy < 5) {
+                    playerState.wonderEnergy += 1;
+                    updateResourcesUI();
+                    saveGameState();
+                }
+            }, 60000);
+
+            // 預設產生一組得卡挑戰
+            generateWonderChallenge();
+        });
+
+        // 更新介面資源
+        function updateResourcesUI() {
+            document.getElementById('hourglass-count').innerText = playerState.hourglasses;
+            document.getElementById('wonder-energy').innerText = playerState.wonderEnergy + "/5";
+            document.getElementById('gold-count').innerText = playerState.gold;
+        }
+
+        // --- 4. 彈窗控制 ---
+        function showModal(title, desc) {
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-desc').innerText = desc;
+            document.getElementById('custom-modal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('custom-modal').classList.add('hidden');
+        }
+
+        // --- 5. 頁籤切換 ---
+        function switchTab(tabName) {
+            // 切換按鈕樣式
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('border-yellow-400', 'text-yellow-400');
+                btn.classList.add('border-transparent', 'text-slate-400');
+            });
+            document.getElementById('tab-' + tabName).classList.add('border-yellow-400', 'text-yellow-400');
+            document.getElementById('tab-' + tabName).classList.remove('border-transparent', 'text-slate-400');
+
+            // 切換內容區
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+            document.getElementById('sect-' + tabName).classList.remove('hidden');
+
+            // 特殊分頁載入初始化
+            if (tabName === 'collection') {
+                renderCollection();
+            } else if (tabName === 'deck') {
+                renderDeckBuilder();
+            } else if (tabName === 'battle') {
+                checkBattleDeckAvailability();
+            }
+        }
+
+        // --- 6. 擴充包抽卡系統 ---
+        function selectPack(packType) {
+            playerState.activePack = packType;
+            
+            // 變更選擇樣式
+            document.querySelectorAll('.pack-option').forEach(opt => {
+                opt.classList.remove('border-red-500/50', 'bg-red-950/20', 'border-yellow-500/50', 'bg-yellow-950/20', 'border-purple-500/50', 'bg-purple-950/20');
+                opt.classList.add('border-slate-700', 'bg-slate-800/30');
+                opt.querySelector('.fa-circle-check').parentNode.classList.add('opacity-0');
+            });
+
+            const targetOpt = document.getElementById(`pack-opt-${packType}`);
+            let badgeText = "CHARIZARD";
+            let colorClass = "red-500";
+            let iconHtml = `<i class="fa-solid fa-fire text-4xl text-red-500 animate-pulse"></i>`;
+
+            if (packType === 'charizard') {
+                targetOpt.classList.add('border-red-500/50', 'bg-red-950/20');
+                targetOpt.classList.remove('border-slate-700', 'bg-slate-800/30');
+                badgeText = "CHARIZARD";
+                colorClass = "red-500";
+                iconHtml = `<i class="fa-solid fa-fire text-4xl text-red-500 animate-pulse"></i>`;
+                document.getElementById('ten-pack-label').innerText = "最強基因：噴火龍";
+            } else if (packType === 'pikachu') {
+                targetOpt.classList.add('border-yellow-500/50', 'bg-yellow-950/20');
+                targetOpt.classList.remove('border-slate-700', 'bg-slate-800/30');
+                badgeText = "PIKACHU";
+                colorClass = "yellow-500";
+                iconHtml = `<i class="fa-solid fa-bolt text-4xl text-yellow-400 animate-pulse"></i>`;
+                document.getElementById('ten-pack-label').innerText = "最強基因：皮卡丘";
+            } else if (packType === 'mewtwo') {
+                targetOpt.classList.add('border-purple-500/50', 'bg-purple-950/20');
+                targetOpt.classList.remove('border-slate-700', 'bg-slate-800/30');
+                badgeText = "MEWTWO";
+                colorClass = "purple-500";
+                iconHtml = `<i class="fa-solid fa-eye text-4xl text-purple-400 animate-pulse"></i>`;
+                document.getElementById('ten-pack-label').innerText = "最強基因：超夢";
+            }
+
+            targetOpt.querySelector('.fa-circle-check').parentNode.classList.remove('opacity-0');
+
+            // 更新預設包裝視覺
+            document.getElementById('pack-label-badge').innerText = badgeText;
+            document.getElementById('pack-label-badge').className = `bg-${colorClass} text-white text-[10px] font-extrabold px-2 py-0.5 rounded mx-auto w-max mb-1`;
+            document.getElementById('pack-center-icon').innerHTML = iconHtml;
+        }
+
+        function buyHourglasses() {
+            if (playerState.gold >= 50) {
+                playerState.gold -= 50;
+                playerState.hourglasses += 120;
+                updateResourcesUI();
+                saveGameState();
+                showModal("交易成功", "您成功使用了 50 金幣，購買了 120 個開包沙漏！");
+            } else {
+                showModal("餘額不足", "您的金幣不足！請透過平時隨機事件獲得金幣。");
+            }
+        }
+
+        // 抽取 5 張卡片的邏輯
+        function drawFiveCards(packType) {
+            let drawn = [];
+            const samePackCards = POKEMON_DATABASE.filter(c => c.pack === packType || c.type === 'Trainer');
+            const commons = samePackCards.filter(c => c.rarity.startsWith('diamond'));
+            const rares = POKEMON_DATABASE.filter(c => !c.rarity.startsWith('diamond'));
+
+            // 前 3 張：保證普通卡
+            for (let i = 0; i < 3; i++) {
+                const randomCommon = commons[Math.floor(Math.random() * commons.length)];
+                drawn.push(randomCommon);
+            }
+
+            // 第 4 張：普通卡 80%，星級稀有卡 20%
+            if (Math.random() < 0.2) {
+                const randomRare = rares[Math.floor(Math.random() * rares.length)];
+                drawn.push(randomRare);
+            } else {
+                const randomCommon = commons[Math.floor(Math.random() * commons.length)];
+                drawn.push(randomCommon);
+            }
+
+            // 第 5 張：特別幸運位！
+            const rareRoll = Math.random();
+            if (rareRoll < 0.02) {
+                // 2% 皇冠爆發！
+                const crowns = POKEMON_DATABASE.filter(c => c.rarity === 'crown');
+                drawn.push(crowns[Math.floor(Math.random() * crowns.length)]);
+            } else if (rareRoll < 0.1) {
+                // 8% 星級 2 或 3
+                const superRares = POKEMON_DATABASE.filter(c => c.rarity === 'star3' || c.rarity === 'star2');
+                drawn.push(superRares[Math.floor(Math.random() * superRares.length)]);
+            } else {
+                // 90% 為 鑽3 或 星1
+                const highQuality = POKEMON_DATABASE.filter(c => c.rarity === 'diamond3' || c.rarity === 'star1');
+                drawn.push(highQuality[Math.floor(Math.random() * highQuality.length)]);
+            }
+
+            return drawn;
+        }
+
+        // 開單包
+        function openPack() {
+            if (playerState.hourglasses < 12) {
+                showModal("沙漏不足", "您的開包沙漏不足 12 個！請點選購買獲得，或等待自動補給。");
+                return;
+            }
+
+            playerState.hourglasses -= 12;
+            updateResourcesUI();
+
+            const packType = playerState.activePack;
+            const drawnCards = drawFiveCards(packType);
+            currentlyDrawnCards = drawnCards;
+
+            // 更新個人收藏
+            drawnCards.forEach(card => {
+                playerState.collection[card.id] = (playerState.collection[card.id] || 0) + 1;
+            });
+
+            // 檢查是否觸發大獎金色煙火
+            const hasCrown = drawnCards.some(c => c.rarity === 'crown' || c.rarity === 'star3');
+
+            // 轉變畫布展示開包
+            document.getElementById('pack-unopened').classList.add('hidden');
+            document.getElementById('pack-ten-unopened').classList.add('hidden');
+            
+            const openedZone = document.getElementById('pack-opened');
+            openedZone.classList.remove('hidden');
+            document.getElementById('opened-pack-title').innerText = "點擊卡牌翻面解鎖！";
+            document.getElementById('reveal-instruction').innerText = "Tap each card to reveal!";
+
+            const grid = document.getElementById('five-cards-grid');
+            grid.innerHTML = ''; 
+
+            drawnCards.forEach((card, index) => {
+                const cardHTML = generateCardElementHTML(card, index, true);
+                grid.innerHTML += cardHTML;
+            });
+
+            if (hasCrown) {
+                triggerGoldExplosion();
+            }
+
+            playerState.gold += 10;
+            updateResourcesUI();
+            saveGameState();
+        }
+
+        // ?? 10 連抽準備：展示十包重疊視覺 ??
+        function openTenPacks() {
+            if (playerState.hourglasses < 120) {
+                showModal("沙漏不足", "您的開包沙漏不足 120 個！需要 10 包份量的沙漏才能啟動 10 連抽。");
+                return;
+            }
+
+            // 顯示 10 包未撕包裝頁面
+            document.getElementById('pack-unopened').classList.add('hidden');
+            document.getElementById('pack-opened').classList.add('hidden');
+            document.getElementById('pack-ten-unopened').classList.remove('hidden');
+        }
+
+        // ?? 正式撕開 10 包擴充包 ??
+        function ripTenPacks() {
+            playerState.hourglasses -= 120;
+            updateResourcesUI();
+
+            const packType = playerState.activePack;
+            let allDrawn = [];
+
+            // 一次抽取 10 包的卡牌（共 50 張）
+            for (let p = 0; p < 10; p++) {
+                const packCards = drawFiveCards(packType);
+                allDrawn = allDrawn.concat(packCards);
+            }
+
+            currentlyDrawnCards = allDrawn;
+
+            // 寫入本地收藏快取
+            allDrawn.forEach(card => {
+                playerState.collection[card.id] = (playerState.collection[card.id] || 0) + 1;
+            });
+
+            // 統計大獎
+            const hasCrownOrStar3 = allDrawn.some(c => c.rarity === 'crown' || c.rarity === 'star3');
+
+            // 隱藏 10 包準備區，前往大卡池格
+            document.getElementById('pack-ten-unopened').classList.add('hidden');
+            const openedZone = document.getElementById('pack-opened');
+            openedZone.classList.remove('hidden');
+
+            document.getElementById('opened-pack-title').innerText = `十連抽開盒！獲得 50 張精美卡牌！`;
+            document.getElementById('reveal-instruction').innerText = "點擊下方任何卡片進行逐一揭曉，或使用一鍵翻開！";
+
+            const grid = document.getElementById('five-cards-grid');
+            grid.innerHTML = '';
+
+            // 50張覆蓋卡排入網格
+            allDrawn.forEach((card, index) => {
+                grid.innerHTML += generateCardElementHTML(card, index, true);
+            });
+
+            // 得卡金幣返還獎勵
+            playerState.gold += 120; // 十連返還 120 金幣
+            updateResourcesUI();
+
+            // 若有皇冠或三星卡觸發豪華煙火
+            if (hasCrownOrStar3) {
+                triggerGoldExplosion();
+            }
+
+            saveGameState();
+        }
+
+        // ?? 一鍵翻開當前批次的所有卡牌 ??
+        function revealAllCards() {
+            const innerElements = document.querySelectorAll('#five-cards-grid .card-inner');
+            innerElements.forEach(inner => {
+                if (!inner.classList.contains('card-flipped')) {
+                    inner.classList.add('card-flipped');
+                }
+            });
+            addLog("?? 已自動為您一鍵翻開所有開出的寶可夢卡片！");
+        }
+
+        // 重置抽卡展示區
+        function resetPackZone() {
+            document.getElementById('pack-opened').classList.add('hidden');
+            document.getElementById('pack-ten-unopened').classList.add('hidden');
+            document.getElementById('pack-unopened').classList.remove('hidden');
+            currentlyDrawnCards = [];
+        }
+
+        // 卡片 3D 翻面動作
+        function flipCard(element, rarity) {
+            const inner = element.querySelector('.card-inner');
+            if (!inner.classList.contains('card-flipped')) {
+                inner.classList.add('card-flipped');
+                
+                // 如果是稀有卡，翻面時發出炫酷粒子爆裂
+                if (rarity === 'crown' || rarity.startsWith('star')) {
+                    createSparkles(element, rarity === 'crown' ? '#fbbf24' : '#67e8f9');
+                }
+            }
+        }
+
+        // 產生單張卡片 HTML (支援 3D 結構，優化加載防破圖與重疊動畫)
+        function generateCardElementHTML(card, index, maskMode = false) {
+            const isCrown = card.rarity === 'crown';
+            const isStar = card.rarity.startsWith('star');
+            const rarityDisplay = getRarityStars(card.rarity);
+            const typeBadge = getTypeColorBadge(card.type);
+
+            return `
+                <div class="card-container w-full aspect-[2/3] cursor-pointer" onclick="flipCard(this, '${card.rarity}')">
+                    <div class="card-inner w-full h-full relative ${maskMode ? '' : 'card-flipped'}">
+                        
+                        <!-- 卡背 (卡包開啟時先顯示) -->
+                        <div class="card-back absolute inset-0 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 border-2 border-slate-700/80 p-3 flex flex-col justify-between shadow-lg">
+                            <div class="w-full h-full rounded-xl border border-slate-700/30 bg-slate-950/60 flex flex-col items-center justify-center gap-2">
+                                <div class="w-12 h-12 rounded-full border border-yellow-500/40 flex items-center justify-center bg-slate-900 shadow-lg">
+                                    <span class="text-xl font-black text-yellow-500">P</span>
+                                </div>
+                                <span class="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Pokemon TCG</span>
+                            </div>
+                        </div>
+
+                        <!-- 卡面 (翻轉後顯示) -->
+                        <div class="card-front absolute inset-0 rounded-2xl bg-gradient-to-b ${card.gradient} p-[2px] shadow-lg ${isCrown ? 'rarity-crown-glow' : ''}">
+                            <div class="w-full h-full bg-slate-950 rounded-[14px] p-2 flex flex-col justify-between relative overflow-hidden holo-shimmer">
+                                
+                                <!-- 全息對比流光 -->
+                                <div class="absolute inset-0 bg-white/[0.03] pointer-events-none z-10"></div>
+                                
+                                <!-- 卡片頂部資訊 -->
+                                <div class="flex items-center justify-between z-10">
+                                    <span class="text-[10px] text-slate-400 font-bold uppercase">${typeBadge}</span>
+                                    <div class="flex items-center gap-1">
+                                        <span class="text-[10px] text-slate-400 font-bold">HP</span>
+                                        <span class="text-xs font-black text-slate-200">${card.hp || '-'}</span>
+                                    </div>
+                                </div>
+
+                                <!-- 卡片插圖區 (支援官方透明PNG或意境圖，帶失敗回退與加載過渡機制) -->
+                                <div class="flex-grow my-1.5 rounded-lg bg-slate-900/40 border border-slate-800/80 flex flex-col items-center justify-center relative overflow-hidden">
+                                    <!-- 背景大文字/圖標 -->
+                                    <div class="absolute text-5xl opacity-20 z-0 select-none">${card.emoji}</div>
+                                    
+                                    <!-- 預設動態 Emoji (加載中或失敗時顯示) -->
+                                    <span class="text-3xl z-10 filter drop-shadow-md animate-bounce" style="animation-duration: 4s;">${card.emoji}</span>
+
+                                    <!-- 卡牌主圖片 (加載成功時自動隱藏上方的彈跳 Emoji) -->
+                                    ${card.image ? `
+                                    <img src="${card.image}" alt="${card.name}" class="absolute inset-0 w-full h-full object-contain p-1 z-20 select-none transition-all duration-300 group-hover:scale-105" onload="this.previousElementSibling.style.display='none';" onerror="this.style.display='none';">
+                                    ` : ''}
+                                    
+                                    <span class="text-[9px] text-slate-400 mt-auto mb-1 z-20 text-center px-1 line-clamp-1 bg-slate-950/70 rounded-full py-0.5 max-w-[90%] scale-90">${card.desc}</span>
+                                </div>
+
+                                <!-- 卡片底部資訊 -->
+                                <div class="flex flex-col gap-0.5 z-10">
+                                    <div class="flex items-center justify-between">
+                                        <h5 class="text-xs font-black text-slate-100 truncate">${card.name}</h5>
+                                        <span class="text-[9px] font-bold text-slate-500">#${String(card.id).padStart(3, '0')}</span>
+                                    </div>
+                                    
+                                    <div class="flex items-center justify-between border-t border-slate-800/80 pt-1 mt-0.5">
+                                        <!-- 稀有度星星 -->
+                                        <div class="flex gap-0.5">${rarityDisplay}</div>
+                                        <span class="text-[8px] text-slate-500 font-bold">${card.pack.toUpperCase()}</span>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            `;
+        }
+
+        // 稀有度星星換算 HTML
+        function getRarityStars(rarity) {
+            let html = '';
+            if (rarity === 'crown') {
+                html = '<span class="text-yellow-400 text-[10px]"><i class="fa-solid fa-crown"></i></span>';
+            } else if (rarity === 'star3') {
+                html = '<span class="text-cyan-400 text-[8px]"><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i></span>';
+            } else if (rarity === 'star2') {
+                html = '<span class="text-cyan-400 text-[8px]"><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i></span>';
+            } else if (rarity === 'star1') {
+                html = '<span class="text-cyan-400 text-[8px]"><i class="fa-solid fa-star"></i></span>';
+            } else if (rarity === 'diamond3') {
+                html = '<span class="text-slate-400 text-[8px]"><i class="fa-solid fa-diamond"></i><i class="fa-solid fa-diamond"></i><i class="fa-solid fa-diamond"></i></span>';
+            } else if (rarity === 'diamond2') {
+                html = '<span class="text-slate-400 text-[8px]"><i class="fa-solid fa-diamond"></i><i class="fa-solid fa-diamond"></i></span>';
+            } else if (rarity === 'diamond1') {
+                html = '<span class="text-slate-400 text-[8px]"><i class="fa-solid fa-diamond"></i></span>';
+            }
+            return html;
+        }
+
+        // 屬性色彩標章
+        function getTypeColorBadge(type) {
+            switch(type) {
+                case 'Fire': return '<span class="text-red-400">?? 火</span>';
+                case 'Water': return '<span class="text-blue-400">?? 水</span>';
+                case 'Grass': return '<span class="text-green-400">?? 草</span>';
+                case 'Lightning': return '<span class="text-yellow-400">? 雷</span>';
+                case 'Psychic': return '<span class="text-purple-400">?? 超</span>';
+                case 'Colorless': return '<span class="text-slate-400">? 一般</span>';
+                case 'Trainer': return '<span class="text-emerald-300">?? 訓練卡</span>';
+                default: return '<span class="text-slate-400">無</span>';
+            }
+        }
+
+        // --- 7. 粒子特效發射器 (金粉/火花) ---
+        function createSparkles(element, color) {
+            if (!element) return;
+            const rect = element.getBoundingClientRect();
+            const parent = document.body;
+            
+            for (let i = 0; i < 15; i++) {
+                const sparkle = document.createElement('div');
+                sparkle.classList.add('sparkle');
+                
+                // 亂數大小與軌跡
+                const size = Math.random() * 8 + 4;
+                sparkle.style.width = size + 'px';
+                sparkle.style.height = size + 'px';
+                sparkle.style.background = `radial-gradient(circle, ${color} 20%, transparent 80%)`;
+                
+                // 定位
+                sparkle.style.left = (rect.left + rect.width / 2 + window.scrollX) + 'px';
+                sparkle.style.top = (rect.top + rect.height / 2 + window.scrollY) + 'px';
+                
+                const angle = Math.random() * Math.PI * 2;
+                const distance = Math.random() * 60 + 40;
+                const tx = Math.cos(angle) * distance;
+                const ty = Math.sin(angle) * distance;
+                
+                sparkle.style.setProperty('--tx', `${tx}px`);
+                sparkle.style.setProperty('--ty', `${ty}px`);
+                
+                parent.appendChild(sparkle);
+                
+                // 播放後自我銷毀
+                setTimeout(() => sparkle.remove(), 1000);
+            }
+        }
+
+        // 皇冠金色大暴擊
+        function triggerGoldExplosion() {
+            const duration = 2000;
+            const interval = 150;
+            const end = Date.now() + duration;
+
+            const timer = setInterval(() => {
+                if (Date.now() > end) {
+                    clearInterval(timer);
+                    return;
+                }
+                
+                // 亂數在大螢幕上產生璀璨金色煙火
+                const sparkle = document.createElement('div');
+                sparkle.classList.add('sparkle');
+                const size = Math.random() * 12 + 6;
+                sparkle.style.width = size + 'px';
+                sparkle.style.height = size + 'px';
+                sparkle.style.background = 'radial-gradient(circle, #fbbf24 30%, transparent 80%)';
+                
+                sparkle.style.left = (Math.random() * window.innerWidth) + 'px';
+                sparkle.style.top = (Math.random() * window.innerHeight + window.scrollY) + 'px';
+                
+                const angle = Math.random() * Math.PI * 2;
+                const distance = Math.random() * 100 + 50;
+                sparkle.style.setProperty('--tx', `${Math.cos(angle) * distance}px`);
+                sparkle.style.setProperty('--ty', `${Math.sin(angle) * distance}px`);
+                
+                document.body.appendChild(sparkle);
+                setTimeout(() => sparkle.remove(), 1000);
+            }, interval);
+        }
+
+        // --- 8. 得卡挑戰 (Wonder Pick) 邏輯 ---
+        const TRAINER_NAMES = [
+            "寶可夢大師_小智", "真新鎮_小茂", "火箭隊_武藏", "Kanto_Red_99", 
+            "PokemonPro_Taiwan", "皮卡卡專用手", "小光_Sinnoh", "竹蘭_Champion"
+        ];
+
+        function generateWonderChallenge() {
+            // 隨機選一個訓練家姓名
+            const randomTrainer = TRAINER_NAMES[Math.floor(Math.random() * TRAINER_NAMES.length)];
+            document.getElementById('wonder-trainer-name').innerText = `訓練家 ${randomTrainer}`;
+
+            // 隨機抽選 5 張不重複的卡片
+            let pool = [...POKEMON_DATABASE];
+            let challengeCards = [];
+            // 保證至少有一張星級或皇冠卡，增加吸引力！
+            const highTier = pool.filter(c => !c.rarity.startsWith('diamond'));
+            if (highTier.length > 0) {
+                const firstPick = highTier[Math.floor(Math.random() * highTier.length)];
+                challengeCards.push(firstPick);
+                pool = pool.filter(c => c.id !== firstPick.id);
+            }
+
+            while (challengeCards.length < 5) {
+                const rIndex = Math.floor(Math.random() * pool.length);
+                challengeCards.push(pool[rIndex]);
+                pool.splice(rIndex, 1);
+            }
+
+            playerState.wonderChallenge = challengeCards;
+            saveGameState();
+
+            // 渲染預覽格
+            const previewGrid = document.getElementById('wonder-preview-grid');
+            previewGrid.innerHTML = '';
+            challengeCards.forEach((card, index) => {
+                previewGrid.innerHTML += generateCardElementHTML(card, index, false);
+            });
+        }
+
+        // 刷新挑戰
+        function refreshWonder() {
+            isWonderPicking = false; // 重新產生挑戰時，確實釋放點擊鎖
+            generateWonderChallenge();
+            // 重置介面狀態
+            document.getElementById('wonder-status-show').classList.remove('hidden');
+            document.getElementById('wonder-status-play').classList.add('hidden');
+        }
+
+        // 洗牌蓋牌
+        function startWonderShuffle() {
+            if (playerState.wonderEnergy < 1) {
+                showModal("能量不足", "得卡能量不足！請等待時間自然恢復（每小時恢復 1 點）。");
+                return;
+            }
+
+            playerState.wonderEnergy -= 1;
+            updateResourcesUI();
+            saveGameState();
+
+            isWonderPicking = false; // 確保在開始洗牌時，鎖是解開的
+
+            // 進入蓋牌洗牌狀態
+            document.getElementById('wonder-status-show').classList.add('hidden');
+            const playStatus = document.getElementById('wonder-status-play');
+            playStatus.classList.remove('hidden');
+
+            const playGrid = document.getElementById('wonder-play-grid');
+            playGrid.innerHTML = '';
+
+            // 洗牌打亂
+            let shuffled = [...playerState.wonderChallenge];
+            shuffled.sort(() => Math.random() - 0.5);
+
+            shuffled.forEach((card, index) => {
+                playGrid.innerHTML += `
+                    <div class="card-container w-full aspect-[2/3] cursor-pointer" onclick="chooseWonderCard(this, ${card.id})">
+                        <div class="card-inner w-full h-full relative">
+                            <!-- 卡背 -->
+                            <div class="card-back absolute inset-0 rounded-2xl bg-gradient-to-br from-indigo-950 to-slate-900 border-2 border-indigo-500/50 p-2 flex flex-col justify-between shadow-xl transform hover:-translate-y-2 hover:border-amber-400 transition-all duration-300">
+                                <div class="w-full h-full rounded-xl border border-indigo-500/20 bg-slate-950/60 flex flex-col items-center justify-center gap-2">
+                                    <div class="w-10 h-10 rounded-full border border-amber-500/40 flex items-center justify-center bg-slate-900 shadow-lg">
+                                        <span class="text-sm font-black text-amber-500"><i class="fa-solid fa-question"></i></span>
+                                    </div>
+                                    <span class="text-[8px] text-amber-400/80 font-bold uppercase tracking-widest">WONDER PICK</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        // 玩家進行得卡挑戰選擇
+        function chooseWonderCard(element, cardId) {
+            if (isWonderPicking) return; // 如果已經點過了，在動畫與彈窗重置（暫停期間）直接 return，阻斷多重卡牌點擊 Bug！
+            isWonderPicking = true; // 立即上鎖
+
+            const cardObj = POKEMON_DATABASE.find(c => c.id === cardId);
+            
+            // 加入使用者收藏
+            playerState.collection[cardId] = (playerState.collection[cardId] || 0) + 1;
+            saveGameState();
+
+            // 翻開點擊的卡片並展示
+            const parent = element.parentNode;
+            element.outerHTML = generateCardElementHTML(cardObj, 0, false);
+            
+            // 延遲顯示驚喜彈窗
+            setTimeout(() => {
+                createSparkles(parent.querySelector('.card-container'), '#fbbf24');
+                showModal("得卡成功！", `恭喜您！在得卡挑戰中成功抽取到【${cardObj.name}】(${getTypeColorBadge(cardObj.type)})！此卡牌已歸檔至您的收藏圖鑑。`);
+                
+                // 點完後自動重置挑戰為新的一組
+                setTimeout(() => {
+                    isWonderPicking = false; // 完成揭曉重置後，安全釋放點擊鎖
+                    refreshWonder();
+                }, 1500);
+            }, 1000);
+        }
+
+        // --- 9. 個人卡牌收藏圖鑑邏輯 ---
+        let showOnlyOwned = false;
+
+        function renderCollection() {
+            const grid = document.getElementById('collection-grid');
+            grid.innerHTML = '';
+
+            const searchTerm = document.getElementById('collect-search').value.toLowerCase();
+            const typeFilter = document.getElementById('collect-filter-type').value;
+            const rarityFilter = document.getElementById('collect-filter-rarity').value;
+
+            let ownedCount = 0;
+
+            POKEMON_DATABASE.forEach(card => {
+                const count = playerState.collection[card.id] || 0;
+                if (count > 0) ownedCount++;
+
+                // 搜尋與篩選邏輯
+                const matchesSearch = card.name.toLowerCase().includes(searchTerm);
+                const matchesType = (typeFilter === 'all') || (card.type === typeFilter);
+                
+                let matchesRarity = true;
+                if (rarityFilter === 'crown') matchesRarity = (card.rarity === 'crown');
+                else if (rarityFilter === 'stars') matchesRarity = card.rarity.startsWith('star');
+                else if (rarityFilter === 'diamonds') matchesRarity = card.rarity.startsWith('diamond');
+
+                const matchesOwned = !showOnlyOwned || (count > 0);
+
+                if (matchesSearch && matchesType && matchesRarity && matchesOwned) {
+                    const isOwned = count > 0;
+                    const opacityClass = isOwned ? 'opacity-100' : 'opacity-40 grayscale';
+                    
+                    grid.innerHTML += `
+                        <div class="relative group">
+                            <!-- 已擁有數量徽章 -->
+                            ${isOwned ? `<span class="absolute -top-1 -right-1 bg-cyan-500 text-slate-950 font-black text-[10px] px-1.5 py-0.5 rounded-full z-20 shadow-md">×${count}</span>` : ''}
+                            
+                            <div class="${opacityClass} transition-all duration-300">
+                                ${generateCardElementHTML(card, 0, false)}
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+
+            // 更新完成度統計
+            const totalCount = POKEMON_DATABASE.length;
+            const ratioPercent = Math.round((ownedCount / totalCount) * 100);
+            document.getElementById('collection-stats-ratio').innerText = `${ownedCount} / ${totalCount} (${ratioPercent}%)`;
+            document.getElementById('collection-progress-bar').style.width = `${ratioPercent}%`;
+        }
+
+        function filterCollection() {
+            renderCollection();
+        }
+
+        function toggleOwnedFilter() {
+            showOnlyOwned = !showOnlyOwned;
+            const btn = document.getElementById('btn-toggle-owned');
+            if (showOnlyOwned) {
+                btn.classList.remove('bg-slate-800', 'text-slate-300');
+                btn.classList.add('bg-yellow-400', 'text-slate-950', 'border-yellow-400');
+            } else {
+                btn.classList.add('bg-slate-800', 'text-slate-300');
+                btn.classList.remove('bg-yellow-400', 'text-slate-950', 'border-yellow-400');
+            }
+            renderCollection();
+        }
+
+        function resetWholeCollection() {
+            if (confirm("您確定要重置所有的抽卡進度與收藏數據嗎？這將會清除您所有的牌組！")) {
+                playerState.collection = {};
+                playerState.currentDeck = [];
+                playerState.hourglasses = 120;
+                playerState.gold = 1000;
+                saveGameState();
+                updateResourcesUI();
+                renderCollection();
+                showModal("數據已重置", "您的收藏與資源已恢復至初始狀態。");
+            }
+        }
+
+        // --- 10. 牌組構建 (Deck Builder) 邏輯 ---
+        function renderDeckBuilder() {
+            // 1. 渲染當前牌組卡片
+            const activeContainer = document.getElementById('deck-active-cards');
+            activeContainer.innerHTML = '';
+
+            if (playerState.currentDeck.length === 0) {
+                activeContainer.innerHTML = `
+                    <div class="col-span-full flex flex-col items-center justify-center text-slate-500 text-sm gap-2 py-12">
+                        <i class="fa-solid fa-rectangle-list text-4xl"></i>
+                        <span>目前牌組內沒有卡片。點擊下方的已收藏卡加入！</span>
+                    </div>
+                `;
+            } else {
+                playerState.currentDeck.forEach((cardId, index) => {
+                    const card = POKEMON_DATABASE.find(c => c.id === cardId);
+                    activeContainer.innerHTML += `
+                        <div class="relative group cursor-pointer" onclick="removeCardFromDeck(${index})">
+                            <!-- 移除按鈕 -->
+                            <div class="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] z-20 shadow opacity-0 group-hover:opacity-100 transition-opacity">
+                                <i class="fa-solid fa-minus"></i>
+                            </div>
+                            <div class="transform scale-95 hover:scale-100 transition-transform">
+                                ${generateCardElementHTML(card, 0, false)}
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+
+            // 更新卡片計數
+            document.getElementById('deck-card-count').innerText = `${playerState.currentDeck.length} / 20`;
+
+            // 2. 渲染可供選擇的候選卡片 (必須是使用者已擁有)
+            const candidateGrid = document.getElementById('deck-candidate-grid');
+            candidateGrid.innerHTML = '';
+
+            let hasAnyOwned = false;
+
+            POKEMON_DATABASE.forEach(card => {
+                const count = playerState.collection[card.id] || 0;
+                if (count > 0) {
+                    hasAnyOwned = true;
+                    // 計算目前已經塞入牌組的數量，防止塞超過擁有的數量
+                    const deckUsedCount = playerState.currentDeck.filter(id => id === card.id).length;
+                    const availableCount = count - deckUsedCount;
+
+                    candidateGrid.innerHTML += `
+                        <div class="relative group cursor-pointer" onclick="addCardToDeck(${card.id}, ${availableCount})">
+                            <!-- 剩餘可用張數 -->
+                            <span class="absolute -top-1 -right-1 bg-cyan-600 text-white font-extrabold text-[9px] px-1.5 py-0.5 rounded-full z-20">可加入:${availableCount}</span>
+                            <div class="transform scale-90 hover:scale-95 transition-transform ${availableCount === 0 ? 'opacity-40 grayscale' : ''}">
+                                ${generateCardElementHTML(card, 0, false)}
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+
+            if (!hasAnyOwned) {
+                candidateGrid.innerHTML = `
+                    <div class="col-span-full text-center text-slate-500 py-8 text-sm">
+                        您目前尚未擁有任何卡片！請先前往「擴充包抽卡」或「得卡挑戰」獲取卡牌。
+                    </div>
+                `;
+            }
+
+            // 3. 更新牌組統計數據
+            updateDeckStats();
+            checkBattleDeckAvailability();
+        }
+
+        // 新增卡牌到牌組
+        function addCardToDeck(cardId, availableCount) {
+            if (playerState.currentDeck.length >= 20) {
+                showModal("牌組已滿", "一副標準 PTCGP 牌組最多只能容納 20 張卡片！");
+                return;
+            }
+            if (availableCount <= 0) {
+                showModal("數量限制", "您在牌組中加入的這張卡片數量已達到您收藏的上限！請抽取更多擴充包。");
+                return;
+            }
+
+            playerState.currentDeck.push(cardId);
+            saveGameState();
+            renderDeckBuilder();
+        }
+
+        // 從牌組中移除卡片
+        function removeCardFromDeck(index) {
+            playerState.currentDeck.splice(index, 1);
+            saveGameState();
+            renderDeckBuilder();
+        }
+
+        // 清空牌組
+        function clearCurrentDeck() {
+            playerState.currentDeck = [];
+            saveGameState();
+            renderDeckBuilder();
+        }
+
+        // 更新牌組屬性比例、HP 與戰力統計
+        function updateDeckStats() {
+            const currentDeck = playerState.currentDeck;
+            const energyBar = document.getElementById('deck-energy-bar');
+            const energyLegend = document.getElementById('deck-energy-legend');
+            const avgHpElem = document.getElementById('deck-avg-hp');
+            const ratioElem = document.getElementById('deck-poke-train-ratio');
+
+            if (currentDeck.length === 0) {
+                energyBar.innerHTML = `<div class="bg-slate-700 w-full h-full"></div>`;
+                energyLegend.innerHTML = `<li>暫無數據</li>`;
+                avgHpElem.innerText = "0";
+                ratioElem.innerText = "0 / 0";
+                return;
+            }
+
+            // 統計各屬性、HP 與卡牌類型
+            let typeCounts = {};
+            let totalHP = 0;
+            let pokemonCount = 0;
+            let trainerCount = 0;
+
+            currentDeck.forEach(cardId => {
+                const card = POKEMON_DATABASE.find(c => c.id === cardId);
+                
+                if (card.isTrainer) {
+                    trainerCount++;
+                    typeCounts["Trainer"] = (typeCounts["Trainer"] || 0) + 1;
+                } else {
+                    pokemonCount++;
+                    totalHP += card.hp;
+                    typeCounts[card.type] = (typeCounts[card.type] || 0) + 1;
+                }
+            });
+
+            // 計算平均 HP (僅計算寶可夢)
+            const avgHP = pokemonCount > 0 ? Math.round(totalHP / pokemonCount) : 0;
+            avgHpElem.innerText = avgHP;
+            ratioElem.innerText = `${pokemonCount} / ${trainerCount}`;
+
+            // 屬性色彩定義
+            const colorMap = {
+                "Fire": "bg-red-500",
+                "Water": "bg-blue-500",
+                "Grass": "bg-green-500",
+                "Lightning": "bg-yellow-400",
+                "Psychic": "bg-purple-500",
+                "Colorless": "bg-slate-500",
+                "Trainer": "bg-emerald-400"
+            };
+
+            // 渲染進度能量條
+            energyBar.innerHTML = '';
+            energyLegend.innerHTML = '';
+
+            Object.keys(typeCounts).forEach(type => {
+                const count = typeCounts[type];
+                const percentage = (count / currentDeck.length) * 100;
+                const colorClass = colorMap[type] || 'bg-slate-500';
+
+                // 新增能量色條
+                energyBar.innerHTML += `
+                    <div class="${colorClass} h-full" style="width: ${percentage}%" title="${type}: ${count}張"></div>
+                `;
+
+                // 新增圖例
+                energyLegend.innerHTML += `
+                    <div class="flex items-center gap-1">
+                        <span class="inline-block w-2.5 h-2.5 rounded-sm ${colorClass}"></span>
+                        <span>${type} (${count}張)</span>
+                    </div>
+                `;
+            });
+        }
+
+        // 儲存當前構建牌組至本機快取
+        function saveDeckToLocal() {
+            const deckName = document.getElementById('deck-name-input').value.trim() || "我的預設牌組";
+            saveGameState();
+            showModal("牌組儲存完畢", `牌組【${deckName}】(共 ${playerState.currentDeck.length} 張卡) 已成功儲存於本機數據中！`);
+        }
+
+
+        // ==================== 11. 全新實戰對決 (Battle System) 核心代碼 ====================
+
+        // 檢查玩家是否擁有完整的對決牌組
+        function checkBattleDeckAvailability() {
+            const deckCount = playerState.currentDeck.length;
+            const badge = document.getElementById('battle-deck-count-badge');
+            
+            if (badge) {
+                badge.innerText = `${deckCount} / 20 張`;
+                if (deckCount === 20) {
+                    badge.className = "font-bold px-2 py-0.5 rounded text-xs bg-green-500 text-white";
+                } else {
+                    badge.className = "font-bold px-2 py-0.5 rounded text-xs bg-red-500 text-white";
+                }
+            }
+        }
+
+        // 玩家卡牌不足時的一鍵推薦牌組(模擬體驗)
+        function autoFillMockDeck() {
+            // 自動挑選 20 張經典牌組，並解鎖收藏 (方便立即測試)
+            const mockDeck = [
+                1, 1, 10, 10, 19, 19, 22, 22, // 火力 (噴火龍ex、小火龍、九尾、風速狗ex)
+                15, 15, 16, 16, // 功能牌 (精靈球、博士研究)
+                2, 2, 12, 12, 23, 23, // 雷力 (皮卡丘ex、皮卡丘、雷丘)
+                21, 21 // 肉盾一般系 (卡比獸)
+            ];
+            
+            // 寫入收藏防止圖鑑顯示黑白
+            mockDeck.forEach(id => {
+                playerState.collection[id] = Math.max(playerState.collection[id] || 0, 2);
+            });
+            playerState.currentDeck = mockDeck;
+            saveGameState();
+
+            checkBattleDeckAvailability();
+            showModal("牌組推薦成功", "已為您解鎖並自動填裝 20 張「噴火龍 & 皮卡丘」混合主力牌組！您現在可以直接進入實戰！");
+            
+            // 重新整理牌組構建畫面(若有)
+            renderDeckBuilder();
+        }
+
+        // 開始對決！
+        function startBattle() {
+            if (playerState.currentDeck.length !== 20) {
+                showModal("無法開啟對決", "進入戰鬥需要一組完整的 20 張牌組！請先使用下方「一鍵生成推薦對決牌組」功能。");
+                return;
+            }
+
+            // 1. 初始化戰鬥日誌
+            battleObj.logs = [];
+            addLog("?? 對決正式開始！正在洗牌並分發手牌...");
+
+            // 2. 準備玩家牌組與手牌
+            // 打亂玩家牌組
+            battleObj.playerDeck = [...playerState.currentDeck].sort(() => Math.random() - 0.5);
+            battleObj.playerHand = [];
+            battleObj.playerActive = null;
+            battleObj.playerBench = [];
+            battleObj.playerPrizes = 0;
+            battleObj.playerEnergyPool = 0;
+            battleObj.hasAttachedEnergyThisTurn = false;
+
+            // 3. 準備 AI 牌組與手牌
+            const aiDeckType = document.querySelector('input[name="ai-deck-type"]:checked').value;
+            let rawAiDeck = [];
+            if (aiDeckType === 'pikachu') {
+                rawAiDeck = [2, 2, 12, 12, 23, 23, 4, 4, 5, 5, 11, 11, 20, 20, 15, 15, 16, 16, 21, 21]; // 雷水牌組
+            } else {
+                rawAiDeck = [1, 1, 10, 10, 19, 19, 22, 22, 7, 7, 9, 9, 6, 6, 15, 15, 16, 16, 21, 21]; // 草火牌組
+            }
+            battleObj.aiDeck = rawAiDeck.sort(() => Math.random() - 0.5);
+            battleObj.aiHand = [];
+            battleObj.aiActive = null;
+            battleObj.aiBench = [];
+            battleObj.aiPrizes = 0;
+            battleObj.aiEnergyPool = 0;
+            battleObj.aiHasAttachedEnergyThisTurn = false;
+
+            // 4. 起手抽 5 張牌
+            for (let i = 0; i < 5; i++) {
+                drawCard("player");
+                drawCard("ai");
+            }
+
+            // 5. 設定狀態與 UI
+            battleObj.status = "select_active"; // 階段一：必須先派出一隻戰鬥寶可夢
+            battleObj.turn = "player";
+
+            document.getElementById('battle-setup-zone').classList.add('hidden');
+            document.getElementById('battle-playground-zone').classList.remove('hidden');
+
+            addLog("?? 階段【派出起手寶可夢】：請從手牌中點選一隻「寶可夢」卡派往戰鬥席位！");
+
+            // 重新整理戰地畫面
+            renderBattlefield();
+        }
+
+        // 抽牌核心函數
+        function drawCard(target) {
+            if (target === 'player') {
+                if (battleObj.playerDeck.length > 0) {
+                    const cardId = battleObj.playerDeck.pop();
+                    const card = POKEMON_DATABASE.find(c => c.id === cardId);
+                    battleObj.playerHand.push(card);
+                } else {
+                    addLog("?? 玩家牌組已空，無法抽牌！");
+                }
+            } else {
+                if (battleObj.aiDeck.length > 0) {
+                    const cardId = battleObj.aiDeck.pop();
+                    const card = POKEMON_DATABASE.find(c => c.id === cardId);
+                    battleObj.aiHand.push(card);
+                }
+            }
+        }
+
+        // 日誌寫入
+        function addLog(message) {
+            battleObj.logs.push(message);
+            const logBox = document.getElementById('battle-log-box');
+            if (logBox) {
+                logBox.innerHTML = battleObj.logs.map(log => `<div class="border-b border-slate-900/40 pb-1">${log}</div>`).join('');
+                logBox.scrollTop = logBox.scrollHeight; // 滾動到底部
+            }
+        }
+
+        // 渲染實戰局勢介面
+        function renderBattlefield() {
+            // 1. 更新計分
+            updatePrizesUI();
+
+            // 2. 顯示剩餘牌張與手牌數量
+            document.getElementById('player-deck-count').innerText = `剩餘牌組: ${battleObj.playerDeck.length} 張`;
+            document.getElementById('player-energy-pool').innerText = `能量儲備: ${battleObj.playerEnergyPool} 點`;
+            
+            document.getElementById('ai-deck-count').innerText = `AI 牌組餘: ${battleObj.aiDeck.length} 張`;
+            document.getElementById('ai-hand-count').innerText = `AI 手牌: ${battleObj.aiHand.length} 張`;
+            document.getElementById('ai-energy-count').innerText = `AI 儲備能: ${battleObj.aiEnergyPool}`;
+
+            // 附能限制
+            const attachBtn = document.getElementById('btn-attach-energy');
+            const attachIndicator = document.getElementById('player-energy-attach-avail');
+            if (battleObj.hasAttachedEnergyThisTurn || battleObj.playerEnergyPool <= 0 || battleObj.turn !== 'player' || !battleObj.playerActive) {
+                attachBtn.disabled = true;
+                attachBtn.className = "mt-1 py-1 px-2.5 bg-slate-800 text-slate-500 font-bold text-[10px] rounded cursor-not-allowed";
+                attachIndicator.innerText = "不可用";
+                attachIndicator.className = "font-bold text-red-500";
+            } else {
+                attachBtn.disabled = false;
+                attachBtn.className = "mt-1 py-1 px-2.5 bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-black text-[10px] rounded transition-all";
+                attachIndicator.innerText = "可使用";
+                attachIndicator.className = "font-bold text-green-400";
+            }
+
+            // 指示器
+            const turnIndicator = document.getElementById('battle-turn-indicator');
+            if (battleObj.status === 'select_active') {
+                turnIndicator.innerText = "請選擇出戰寶可夢";
+                turnIndicator.className = "text-sm font-black text-orange-400 animate-pulse";
+            } else if (battleObj.turn === 'player') {
+                turnIndicator.innerText = "您的回合 (YOUR TURN)";
+                turnIndicator.className = "text-sm font-black text-green-400";
+            } else {
+                turnIndicator.innerText = "電腦 AI 回合中...";
+                turnIndicator.className = "text-sm font-black text-red-400 animate-pulse";
+            }
+
+            // 3. 渲染戰鬥場 (Active)
+            const playerActiveSlot = document.getElementById('player-active-slot');
+            if (battleObj.playerActive) {
+                playerActiveSlot.innerHTML = generateBattleCardHTML(battleObj.playerActive, 'player_active');
+                // 渲染攻擊按鈕
+                renderAttackButtons();
+            } else {
+                playerActiveSlot.innerHTML = `
+                    <div class="text-center p-3 text-xs text-slate-500">
+                        <i class="fa-solid fa-sparkles text-xl mb-1 text-slate-700 animate-ping"></i>
+                        <p>戰鬥場空缺中</p>
+                    </div>
+                `;
+                document.getElementById('player-active-actions').innerHTML = '';
+            }
+
+            const aiActiveSlot = document.getElementById('ai-active-slot');
+            if (battleObj.aiActive) {
+                aiActiveSlot.innerHTML = generateBattleCardHTML(battleObj.aiActive, 'ai_active');
+            } else {
+                aiActiveSlot.innerHTML = `
+                    <div class="text-center p-3 text-xs text-slate-500">
+                        <i class="fa-solid fa-skull-crossbones text-xl mb-1 text-red-950"></i>
+                        <p>戰鬥場空缺中</p>
+                    </div>
+                `;
+            }
+
+            // 4. 渲染後備席 (Bench)
+            for (let i = 0; i < 2; i++) {
+                const playerBenchSlot = document.getElementById(`player-bench-${i}`);
+                if (battleObj.playerBench[i]) {
+                    playerBenchSlot.innerHTML = generateBattleCardHTML(battleObj.playerBench[i], `player_bench_${i}`);
+                } else {
+                    playerBenchSlot.innerHTML = `
+                        <div class="text-center p-1 text-[10px] text-slate-600">
+                            <p>空席</p>
+                        </div>
+                    `;
+                }
+
+                const aiBenchSlot = document.getElementById(`ai-bench-${i}`);
+                if (battleObj.aiBench[i]) {
+                    aiBenchSlot.innerHTML = generateBattleCardHTML(battleObj.aiBench[i], `ai_bench_${i}`);
+                } else {
+                    aiBenchSlot.innerHTML = `
+                        <div class="text-center p-1 text-[10px] text-slate-600">
+                            <p>空席</p>
+                        </div>
+                    `;
+                }
+            }
+
+            // 5. 渲染玩家手牌
+            renderPlayerHand();
+        }
+
+        // 渲染玩家計分板 (得 3 分者獲勝)
+        function updatePrizesUI() {
+            const playerContainer = document.getElementById('player-prizes-ui');
+            const aiContainer = document.getElementById('ai-prizes-ui');
+
+            let pHTML = '';
+            for (let i = 0; i < 3; i++) {
+                if (i < battleObj.playerPrizes) {
+                    pHTML += `<span class="w-4 h-4 rounded-full bg-cyan-400 shadow-lg shadow-cyan-500/50 flex items-center justify-center text-[8px] text-slate-950 font-black"><i class="fa-solid fa-check"></i></span>`;
+                } else {
+                    pHTML += `<span class="w-4 h-4 rounded-full bg-slate-800 border border-slate-700"></span>`;
+                }
+            }
+            playerContainer.innerHTML = pHTML;
+
+            let aHTML = '';
+            for (let i = 0; i < 3; i++) {
+                if (i < battleObj.aiPrizes) {
+                    aHTML += `<span class="w-4 h-4 rounded-full bg-red-500 shadow-lg shadow-red-500/50 flex items-center justify-center text-[8px] text-white font-black"><i class="fa-solid fa-check"></i></span>`;
+                } else {
+                    aHTML += `<span class="w-4 h-4 rounded-full bg-slate-800 border border-slate-700"></span>`;
+                }
+            }
+            aiContainer.innerHTML = aHTML;
+        }
+
+        // 渲染玩家手牌 (附帶可用與不可用之視覺差)
+        function renderPlayerHand() {
+            const handContainer = document.getElementById('player-hand-cards');
+            handContainer.innerHTML = '';
+
+            battleObj.playerHand.forEach((card, index) => {
+                let isPlayable = false;
+                let playActionLabel = "";
+
+                if (battleObj.status === "select_active") {
+                    // 起手派出戰鬥寶可夢：只能點擊「非訓練家」卡
+                    if (!card.isTrainer) {
+                        isPlayable = true;
+                        playActionLabel = "派往戰鬥席";
+                    }
+                } else if (battleObj.turn === "player") {
+                    // 常規回合
+                    if (card.isTrainer) {
+                        isPlayable = true;
+                        playActionLabel = "使用卡片";
+                    } else {
+                        // 寶可夢卡：若後備席未滿 2 個，可放置後備
+                        if (battleObj.playerBench.length < 2) {
+                            isPlayable = true;
+                            playActionLabel = "置入後備";
+                        }
+                    }
+                }
+
+                const opacityClass = isPlayable ? 'opacity-100 ring-2 ring-cyan-500/40 hover:scale-105' : 'opacity-60 cursor-not-allowed';
+
+                handContainer.innerHTML += `
+                    <div class="relative group transition-all ${opacityClass}" onclick="handleHandCardClick(${index}, ${isPlayable})">
+                        ${isPlayable ? `<span class="absolute -top-1 left-1/2 -translate-x-1/2 bg-cyan-500 text-slate-950 font-black text-[9px] px-1.5 py-0.5 rounded shadow z-20 whitespace-nowrap">${playActionLabel}</span>` : ''}
+                        <div class="scale-95">
+                            ${generateCardElementHTML(card, 0, false)}
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        // 點擊手牌處理
+        function handleHandCardClick(index, isPlayable) {
+            if (!isPlayable) return;
+
+            const card = battleObj.playerHand[index];
+
+            if (battleObj.status === "select_active") {
+                // 派往戰鬥場
+                battleObj.playerActive = {
+                    ...card,
+                    currentHp: card.hp,
+                    attachedEnergy: 0
+                };
+                // 從手牌移除
+                battleObj.playerHand.splice(index, 1);
+                battleObj.status = "active";
+                addLog(`?? 您派出了【${card.name}】作為起手戰鬥寶可夢！`);
+
+                // 同步讓 AI 派出起手戰鬥寶可夢
+                aiChooseActive();
+
+                // 回合正式開始，玩家自動獲取 1 點儲備能量，並自動抽 1 張卡
+                startPlayerTurn();
+            } else if (battleObj.turn === "player") {
+                // 常規玩家回合
+                if (card.isTrainer) {
+                    playTrainerCard(card, index);
+                } else {
+                    // 放置於後備席
+                    if (battleObj.playerBench.length < 2) {
+                        battleObj.playerBench.push({
+                            ...card,
+                            currentHp: card.hp,
+                            attachedEnergy: 0
+                        });
+                        battleObj.playerHand.splice(index, 1);
+                        addLog(`?? 您將【${card.name}】放置於後備席！`);
+                    }
+                }
+            }
+
+            renderBattlefield();
+        }
+
+        // AI 智慧選擇起手戰鬥寶可夢
+        function aiChooseActive() {
+            // 尋找 AI 手牌中的非訓練家卡
+            const pokemonIndex = battleObj.aiHand.findIndex(c => !c.isTrainer);
+            if (pokemonIndex !== -1) {
+                const card = battleObj.aiHand[pokemonIndex];
+                battleObj.aiActive = {
+                    ...card,
+                    currentHp: card.hp,
+                    attachedEnergy: 0
+                };
+                battleObj.aiHand.splice(pokemonIndex, 1);
+                addLog(`?? 電腦 AI 派出了【${card.name}】作為其戰鬥寶可夢！`);
+            } else {
+                // 萬一 AI 起手沒拿到寶可夢(機率極低)，從牌組抓一隻
+                const deckPokeIdx = battleObj.aiDeck.findIndex(id => !POKEMON_DATABASE.find(c => c.id === id).isTrainer);
+                if (deckPokeIdx !== -1) {
+                    const cardId = battleObj.aiDeck.splice(deckPokeIdx, 1)[0];
+                    const card = POKEMON_DATABASE.find(c => c.id === cardId);
+                    battleObj.aiActive = {
+                        ...card,
+                        currentHp: card.hp,
+                        attachedEnergy: 0
+                    };
+                    addLog(`?? 電腦 AI 洗牌抓取【${card.name}】作為戰鬥寶可夢！`);
+                }
+            }
+        }
+
+        // 玩家回合開始
+        function startPlayerTurn() {
+            battleObj.turn = "player";
+            battleObj.hasAttachedEnergyThisTurn = false;
+            // 回合開始：自動獲得 1 點能量、自動抽一張牌
+            battleObj.playerEnergyPool += 1;
+            drawCard("player");
+            addLog(`?? 回合開始！您自動獲得 1 點儲備能量，並自牌組中抽取 1 張牌。`);
+            renderBattlefield();
+        }
+
+        // 玩家手動附加能量給戰鬥中寶可夢
+        function attachEnergyToActive() {
+            if (battleObj.turn !== 'player' || !battleObj.playerActive) return;
+            if (battleObj.hasAttachedEnergyThisTurn) {
+                showModal("動作限制", "每回合只能手動附加 1 點能量給戰鬥場上的寶可夢！");
+                return;
+            }
+            if (battleObj.playerEnergyPool <= 0) {
+                showModal("能量不足", "您當前的儲備能量為 0！");
+                return;
+            }
+
+            battleObj.playerEnergyPool -= 1;
+            battleObj.playerActive.attachedEnergy += 1;
+            battleObj.hasAttachedEnergyThisTurn = true;
+
+            addLog(`? 您將 1 點能量附加給【${battleObj.playerActive.name}】！(目前能量: ${battleObj.playerActive.attachedEnergy})`);
+            renderBattlefield();
+        }
+
+        // 使用訓練卡
+        function playTrainerCard(card, index) {
+            battleObj.playerHand.splice(index, 1); // 扣除手牌
+            addLog(`?? 您使用了訓練卡【${card.name}】！`);
+
+            if (card.id === 15) {
+                // 精靈球：從牌組隨機抽一隻寶可夢
+                const pokeIdInDeck = battleObj.playerDeck.find(id => !POKEMON_DATABASE.find(c => c.id === id).isTrainer);
+                if (pokeIdInDeck) {
+                    const pokeIdx = battleObj.playerDeck.indexOf(pokeIdInDeck);
+                    battleObj.playerDeck.splice(pokeIdx, 1);
+                    const pokeCard = POKEMON_DATABASE.find(c => c.id === pokeIdInDeck);
+                    battleObj.playerHand.push(pokeCard);
+                    addLog(`??【精靈球效應】您成功自牌組檢索到基礎寶可夢【${pokeCard.name}】加入手牌！`);
+                } else {
+                    addLog("??【精靈球效應】然而您的剩餘牌組中已沒有寶可夢卡！");
+                }
+            } else if (card.id === 16) {
+                // 博士的研究：多抽 2 張卡片
+                drawCard("player");
+                drawCard("player");
+                addLog("??【博士的研究】您額外自牌組中抽取了 2 張牌！");
+            } else if (card.id === 14) {
+                // 娜姿：強制 AI 替換其戰鬥寶可夢
+                if (battleObj.aiBench.length > 0) {
+                    const oldActive = battleObj.aiActive;
+                    // 將 AI 後備 0 與 Active 強制對調
+                    battleObj.aiActive = battleObj.aiBench[0];
+                    battleObj.aiBench[0] = oldActive;
+                    addLog(`???♀?【娜姿效應】強制命令 AI 的【${oldActive.name}】退回後備，並拉出【${battleObj.aiActive.name}】進入戰鬥場！`);
+                } else {
+                    addLog("???♀?【娜姿效應】然而 AI 目前沒有後備席寶可夢，此卡效力無效。");
+                }
+            }
+        }
+
+        // 渲染攻擊動作按鈕
+        function renderAttackButtons() {
+            const container = document.getElementById('player-active-actions');
+            if (!battleObj.playerActive || battleObj.turn !== 'player') {
+                container.innerHTML = '';
+                return;
+            }
+
+            const p = battleObj.playerActive;
+            const isEx = p.rarity === 'crown' || p.rarity.startsWith('star');
+            const requiredEnergy = isEx ? 2 : 1;
+            const damage = isEx ? 100 : 40;
+
+            const canAttack = p.attachedEnergy >= requiredEnergy;
+
+            let attackBtnHTML = `
+                <button onclick="executeAttack(${damage}, ${requiredEnergy})" ${canAttack ? '' : 'disabled'} class="px-3 py-1.5 ${canAttack ? 'bg-red-500 hover:bg-red-400 text-white font-black' : 'bg-slate-800 text-slate-500 cursor-not-allowed'} rounded-lg text-xs transition-all">
+                    ?? ${isEx ? '絕招暴擊' : '一般打擊'} (需 ${requiredEnergy} 能 / 傷 ${damage})
+                </button>
+            `;
+
+            // 撤退按鈕 (若有後備寶可夢，且能量 >= 1 可撤退)
+            const canRetreat = battleObj.playerBench.length > 0 && p.attachedEnergy >= 1;
+            let retreatBtnHTML = `
+                <button onclick="executeRetreat('player')" ${canRetreat ? '' : 'disabled'} class="px-3 py-1.5 ${canRetreat ? 'bg-stone-600 hover:bg-stone-500 text-stone-200' : 'bg-slate-800 text-slate-500 cursor-not-allowed'} rounded-lg text-xs transition-all">
+                    ?? 撤退 (消 1 能)
+                </button>
+            `;
+
+            container.innerHTML = attackBtnHTML + retreatBtnHTML;
+        }
+
+        // 執行戰鬥攻擊
+        function executeAttack(damage, cost) {
+            if (battleObj.turn !== 'player' || !battleObj.playerActive || !battleObj.aiActive) return;
+
+            // 扣除能量
+            battleObj.playerActive.attachedEnergy -= cost;
+
+            addLog(`??【您的回合】您的戰鬥巨獸【${battleObj.playerActive.name}】使用大招砸向對手！`);
+            
+            // 敵方受傷震動特效與生命扣減
+            const aiActiveElem = document.getElementById('ai-active-card-render');
+            if (aiActiveElem) {
+                aiActiveElem.classList.add('shake-hurt');
+                setTimeout(() => aiActiveElem.classList.remove('shake-hurt'), 400);
+            }
+
+            // 扣除 HP
+            battleObj.aiActive.currentHp -= damage;
+            addLog(`? 對手的【${battleObj.aiActive.name}】受到了 ${damage} 點巨額物理傷害！(剩餘 HP: ${Math.max(0, battleObj.aiActive.currentHp)})`);
+
+            // 檢查是否瀕死 KO
+            if (battleObj.aiActive.currentHp <= 0) {
+                executeKO("ai");
+            }
+
+            // 攻擊後強制結束您的回合
+            setTimeout(() => {
+                aiTurn();
+            }, 1000);
+        }
+
+        // 撤退動作 (將戰鬥席與後備 0 進行對調，需扣除 1 能量)
+        function executeRetreat(target) {
+            if (target === 'player') {
+                if (battleObj.playerBench.length === 0 || battleObj.playerActive.attachedEnergy < 1) return;
+                
+                battleObj.playerActive.attachedEnergy -= 1;
+                const oldActive = battleObj.playerActive;
+                
+                // 更換
+                battleObj.playerActive = battleObj.playerBench[0];
+                battleObj.playerBench[0] = oldActive;
+
+                addLog(`?? 您主動進行了「戰地撤退」！將【${battleObj.playerActive.name}】派往戰鬥前線！`);
+            } else {
+                // AI 撤退
+                if (battleObj.aiBench.length === 0 || battleObj.aiActive.attachedEnergy < 1) return;
+                
+                battleObj.aiActive.attachedEnergy -= 1;
+                const oldActive = battleObj.aiActive;
+                
+                battleObj.aiActive = battleObj.aiBench[0];
+                battleObj.aiBench[0] = oldActive;
+
+                addLog(`?? AI 電腦判斷局勢，悄悄撤退了【${oldActive.name}】，換上【${battleObj.aiActive.name}】！`);
+            }
+            renderBattlefield();
+        }
+
+        // KO 瀕死判定與得分
+        function executeKO(target) {
+            if (target === 'ai') {
+                addLog(`?? 奇蹟發生！您成功將 AI 的【${battleObj.aiActive.name}】徹底擊倒！`);
+                battleObj.playerPrizes += 1;
+                battleObj.aiActive = null;
+
+                // 檢查是否滿 3 分獲勝
+                if (battleObj.playerPrizes >= 3) {
+                    endBattle("player");
+                    return;
+                }
+
+                // AI 自動遞補後備
+                if (battleObj.aiBench.length > 0) {
+                    battleObj.aiActive = battleObj.aiBench.shift();
+                    addLog(`?? AI 迅速拉出後備席的【${battleObj.aiActive.name}】遞補戰鬥空席！`);
+                } else {
+                    addLog("?? AI 已經沒有任何後備寶可夢！即將在下回合自動認輸。");
+                }
+            } else {
+                addLog(`?? 悲報！您的戰鬥寶可夢【${battleObj.playerActive.name}】倒下了！`);
+                battleObj.aiPrizes += 1;
+                battleObj.playerActive = null;
+
+                // 檢查 AI 是否獲勝
+                if (battleObj.aiPrizes >= 3) {
+                    endBattle("ai");
+                    return;
+                }
+
+                // 強制玩家必須立刻挑選一個後備上陣
+                if (battleObj.playerBench.length > 0) {
+                    battleObj.playerActive = battleObj.playerBench.shift();
+                    addLog(`??? 您的主力後盾【${battleObj.playerActive.name}】臨危受命，踏入戰鬥前線！`);
+                } else {
+                    showModal("局勢告急！", "您所有的戰鬥寶可夢已陣亡且後備無人！下回合將被系統判定落敗！");
+                }
+            }
+            renderBattlefield();
+        }
+
+        // 結束戰鬥
+        function endBattle(winner) {
+            battleObj.status = "end";
+            if (winner === "player") {
+                triggerGoldExplosion();
+                playerState.gold += 100; // 獲勝獎勵
+                saveGameState();
+                updateResourcesUI();
+                showModal("? Victory 戰役大捷！", "恭喜您展現卓越智商，擊敗了 AI 訓練大師！獲得了 100 枚金幣！");
+            } else {
+                showModal("? Defeat 戰敗...", "惜敗！AI 電腦在細節決策上略勝一籌。別灰心，去抽取更多神卡調整您的卡組吧！");
+            }
+
+            concedeBattle(); // 回到起點
+        }
+
+        // 認輸或重置戰鬥回到設定頁
+        function concedeBattle() {
+            battleObj.status = "idle";
+            document.getElementById('battle-setup-zone').classList.remove('hidden');
+            document.getElementById('battle-playground-zone').classList.add('hidden');
+            checkBattleDeckAvailability();
+        }
+
+
+        // ==================== 12. 電腦 AI 智慧對戰邏輯 (極致擬真) ====================
+        function aiTurn() {
+            if (battleObj.status === "end" || battleObj.status === "idle") return;
+            battleObj.turn = "ai";
+            renderBattlefield();
+
+            addLog("??【電腦 AI 的回合】正在精密運算最佳出牌決策...");
+
+            setTimeout(() => {
+                // 1. AI 自動抽牌與注入儲備能量
+                battleObj.aiEnergyPool += 1;
+                drawCard("ai");
+
+                // 2. 檢測戰鬥席若空缺(被擊倒後無遞補)，立刻從手牌/後備遞補
+                if (!battleObj.aiActive) {
+                    if (battleObj.aiBench.length > 0) {
+                        battleObj.aiActive = battleObj.aiBench.shift();
+                        addLog(`?? AI 從後備調遣了【${battleObj.aiActive.name}】遞補戰鬥。`);
+                    } else {
+                        // 從手牌隨機召喚一隻寶可夢出戰
+                        const handPokeIdx = battleObj.aiHand.findIndex(c => !c.isTrainer);
+                        if (handPokeIdx !== -1) {
+                            battleObj.aiActive = {
+                                ...battleObj.aiHand[handPokeIdx],
+                                currentHp: battleObj.aiHand[handPokeIdx].hp,
+                                attachedEnergy: 0
+                            };
+                            battleObj.aiHand.splice(handPokeIdx, 1);
+                            addLog(`?? AI 從手牌直接特召【${battleObj.aiActive.name}】上陣。`);
+                        } else {
+                            // 無卡可出
+                            addLog("??? AI 沒有任何寶可夢可以作戰，宣布投降！");
+                            endBattle("player");
+                            return;
+                        }
+                    }
+                }
+
+                // 3. AI 將手牌中多餘的寶可夢放至後備 (最多2隻)
+                let playCount = 0;
+                for (let i = battleObj.aiHand.length - 1; i >= 0; i--) {
+                    const card = battleObj.aiHand[i];
+                    if (!card.isTrainer && battleObj.aiBench.length < 2) {
+                        battleObj.aiBench.push({
+                            ...card,
+                            currentHp: card.hp,
+                            attachedEnergy: 0
+                        });
+                        battleObj.aiHand.splice(i, 1);
+                        addLog(`?? AI 將手牌的【${card.name}】放置於後備席。`);
+                        playCount++;
+                        if (playCount >= 1) break; // 每回合不鋪太滿，保留策略
+                    }
+                }
+
+                // 4. AI 智慧附能 (將儲備能量給予當前 Active 戰鬥寶可夢)
+                if (battleObj.aiEnergyPool > 0 && battleObj.aiActive) {
+                    battleObj.aiEnergyPool -= 1;
+                    battleObj.aiActive.attachedEnergy += 1;
+                    addLog(`? AI 將 1 點儲備能量附加給了【${battleObj.aiActive.name}】。`);
+                }
+
+                // 5. 判斷是否能使用訓練卡 (隨機使用精靈球、博士研究)
+                const trainerIdx = battleObj.aiHand.findIndex(c => c.isTrainer);
+                if (trainerIdx !== -1) {
+                    const trainerCard = battleObj.aiHand[trainerIdx];
+                    battleObj.aiHand.splice(trainerIdx, 1);
+                    addLog(`?? AI 電腦啟動了功能牌【${trainerCard.name}】！`);
+                    if (trainerCard.id === 16) {
+                        drawCard("ai");
+                        drawCard("ai");
+                        addLog("??【AI 博士研究】AI 多抽取了 2 張手牌。");
+                    }
+                }
+
+                // 6. 戰鬥評估：如果擁有足夠能量則發動大招攻擊玩家
+                setTimeout(() => {
+                    if (battleObj.aiActive && battleObj.playerActive) {
+                        const isEx = battleObj.aiActive.rarity === 'crown' || battleObj.aiActive.rarity.startsWith('star');
+                        const requiredEnergy = isEx ? 2 : 1;
+                        const damage = isEx ? 100 : 40;
+
+                        if (battleObj.aiActive.attachedEnergy >= requiredEnergy) {
+                            // 發動大絕
+                            battleObj.aiActive.attachedEnergy -= requiredEnergy;
+                            addLog(`??【AI 電腦發動猛攻！】對手【${battleObj.aiActive.name}】狂嘯衝撞！`);
+
+                            const playerActiveElem = document.getElementById('player-active-card-render');
+                            if (playerActiveElem) {
+                                playerActiveElem.classList.add('shake-hurt');
+                                setTimeout(() => playerActiveElem.classList.remove('shake-hurt'), 400);
+                            }
+
+                            // 玩家 HP 扣減
+                            battleObj.playerActive.currentHp -= damage;
+                            addLog(`? 您的【${battleObj.playerActive.name}】受到了 ${damage} 點巨大傷害！(剩餘 HP: ${Math.max(0, battleObj.playerActive.currentHp)})`);
+
+                            if (battleObj.playerActive.currentHp <= 0) {
+                                executeKO("player");
+                            }
+                        } else {
+                            addLog(`?? AI 的【${battleObj.aiActive.name}】因能量不足本回合選擇採取「防守姿態」。`);
+                        }
+                    }
+
+                    // 7. 將回合控制權回交給玩家
+                    setTimeout(() => {
+                        startPlayerTurn();
+                    }, 1000);
+
+                }, 1000);
+
+            }, 1000);
+        }
+
+        // 專為戰地卡牌設計的 HP、能量渲染 (同樣套用圖片加載與 Emoji 防線)
+        function generateBattleCardHTML(instance, locationId) {
+            const isEx = instance.rarity === 'crown' || instance.rarity.startsWith('star');
+            const maxHp = instance.hp;
+            const currentHp = Math.max(0, instance.currentHp);
+            const hpPercentage = (currentHp / maxHp) * 100;
+            const attachedEnergy = instance.attachedEnergy;
+
+            // 附能指示點
+            let energyDots = '';
+            for (let i = 0; i < attachedEnergy; i++) {
+                energyDots += `<span class="inline-block w-2 h-2 rounded-full bg-yellow-400 animate-pulse border border-yellow-600"></span>`;
+            }
+
+            return `
+                <div class="relative w-full h-full" id="${locationId === 'player_active' ? 'player-active-card-render' : locationId === 'ai_active' ? 'ai-active-card-render' : ''}">
+                    <!-- 生命值進度條 -->
+                    <div class="absolute -top-4 left-0 w-full bg-slate-900 border border-slate-800 h-2 rounded-full overflow-hidden z-20">
+                        <div class="bg-gradient-to-r from-red-500 to-green-500 h-full transition-all duration-300" style="width: ${hpPercentage}%"></div>
+                    </div>
+                    
+                    <!-- 生命值數字 -->
+                    <span class="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-950 px-2 py-0.5 rounded text-[9px] font-mono border border-slate-800 z-20 text-slate-300 font-bold whitespace-nowrap">
+                        HP: ${currentHp} / ${maxHp}
+                    </span>
+
+                    <!-- 附能數顯示 -->
+                    <div class="absolute -bottom-3 left-1/2 -translate-x-1/2 flex gap-1 z-20 bg-slate-900/90 py-0.5 px-2 rounded-full border border-slate-700/80">
+                        ${attachedEnergy > 0 ? energyDots : '<span class="text-[8px] text-slate-500 font-bold whitespace-nowrap">無能量</span>'}
+                    </div>
+
+                    <!-- 原生精緻卡牌主體 -->
+                    <div class="w-full h-full rounded-xl bg-gradient-to-b ${instance.gradient} p-[1.5px] shadow-lg">
+                        <div class="w-full h-full bg-slate-950 rounded-[10px] p-1.5 flex flex-col justify-between relative overflow-hidden">
+                            <div class="flex items-center justify-between text-[8px] font-bold">
+                                <span>${getTypeColorBadge(instance.type)}</span>
+                                <span class="text-slate-400">#${instance.id}</span>
+                            </div>
+
+                            <!-- 戰鬥中的精巧縮圖區域 -->
+                            <div class="flex-grow my-1.5 rounded bg-slate-900/50 flex flex-col items-center justify-center relative overflow-hidden">
+                                <div class="absolute text-4xl opacity-10 z-0 select-none">${instance.emoji}</div>
+                                
+                                <!-- 預設縮圖 Emoji (加載中或失敗時作為視覺防線) -->
+                                <span class="text-xl z-0 transition-opacity duration-300">${instance.emoji}</span>
+
+                                <!-- 戰鬥高清晰透明背景 PNG 插圖 -->
+                                ${instance.image ? `
+                                <img src="${instance.image}" alt="${instance.name}" class="absolute inset-0 w-full h-full object-contain p-0.5 z-10 select-none" onload="this.previousElementSibling.style.opacity='0';" onerror="this.style.display='none';">
+                                ` : ''}
+                            </div>
+
+                            <div class="flex items-center justify-between border-t border-slate-800/80 pt-0.5 mt-0.5 text-[7px] text-slate-500">
+                                <span>${getRarityStars(instance.rarity)}</span>
+                                <span class="font-black text-slate-300 truncate max-w-[50%]">${instance.name}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
